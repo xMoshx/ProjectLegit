@@ -1,0 +1,21 @@
+{
+  "_comment": "The run spec. ISOC runs `node run.js --corpus corpus.json`. Top-level defaults apply unless an article overrides langs/runs. Grow `articles` to the stratified ~120 (content type x source tier x language x author type) per methodology Part 1; these two are the pilot seed.",
+  "model": "gemini-2.5-flash",
+  "runsPerArticle": 3,
+  "langs": ["en"],
+  "grounding": "live",
+  "structured": false,
+  "throttle": { "rate": 30, "windowMs": 60000 },
+  "articles": [
+    {
+      "fixture": "bbc-com-news-articles-c5yzm8m4peeo",
+      "gold": "bbc-com-news-articles-c5yzm8m4peeo",
+      "buckets": { "contentType": "hard-news", "sourceTier": "public-broadcaster", "lang": "en", "authorType": "staff-journalist" }
+    },
+    {
+      "fixture": "en-wikipedia-org-wiki-journalism",
+      "gold": "en-wikipedia-org-wiki-journalism",
+      "buckets": { "contentType": "reference", "sourceTier": "mainstream", "lang": "en", "authorType": "anonymous" }
+    }
+  ]
+}

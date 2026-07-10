@@ -10,8 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-
-const SCRIPTS = path.join(__dirname, '..', 'scripts');
+const { SCRIPTS } = require('./paths');
 // localization must run before utils (parseAgentResponse reads TRANSLATIONS/currentLang).
 const FILES = ['localization.js', 'utils.js', 'agents.js'];
 
@@ -36,6 +35,8 @@ function loadExtension() {
   return {
     getAnalysisAgents: sandbox.getAnalysisAgents,
     parseAgentResponse: sandbox.parseAgentResponse,
+    // Exposed for D8 map-replay: re-score captured raw ratings through the live map.
+    ratingToScore: sandbox.ratingToScore,
     setLang(lang) { sandbox.currentLang = lang; },
     // parseAgentResponse returns the *translated* UNKNOWN label on a parse miss;
     // this lets the runner count those separately from a genuine mid-scale 50.

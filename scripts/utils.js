@@ -1394,6 +1394,7 @@ window.displayPageHeader        = displayPageHeader;
 window.displayOverallScore      = displayOverallScore;
 window.startCalculatingAnimation = startCalculatingAnimation;
 window.parseAgentResponse       = parseAgentResponse;
+window.ratingToScore            = ratingToScore;
 window.parseAndLinkifyQuotes    = parseAndLinkifyQuotes;
 window.parseAndLinkifySources   = parseAndLinkifySources;
 window.escapeHtml               = escapeHtml;

@@ -11,9 +11,8 @@
 const fs = require('fs');
 const path = require('path');
 const { JSDOM } = require('jsdom');
-const Readability = require('../scripts/Readability.js');
-
-const FIXTURES = path.join(__dirname, 'fixtures');
+const { SCRIPTS, FIXTURES } = require('../lib/paths');
+const Readability = require(path.join(SCRIPTS, 'Readability.js'));
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
