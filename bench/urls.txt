@@ -1,0 +1,3 @@
+# One article URL per line. Lines starting with # are ignored.
+# node extract.js       # reads this file
+# node extract.js <url> # ignores this file, uses argv

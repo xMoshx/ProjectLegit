@@ -1,0 +1,14 @@
+{
+  "name": "legit-bench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Offline benchmark harness for the Legit agent pipeline (Milestone 1: D1 runner).",
+  "scripts": {
+    "extract": "node extract.js",
+    "run": "node run.js",
+    "selftest": "node selftest.js"
+  },
+  "dependencies": {
+    "jsdom": "^24.1.0"
+  }
+}
