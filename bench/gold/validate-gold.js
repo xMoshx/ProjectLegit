@@ -14,9 +14,9 @@
 const fs = require('fs');
 const path = require('path');
 const { AGENTS, validRatings } = require('../lib/enums');
+const { BUCKETS, BUCKET_KEYS, validBucket } = require('../lib/buckets');
 const { GOLD: GOLD_DIR } = require('../lib/paths');
 const TIERS = ['green', 'yellow', 'orange', 'red'];
-const BUCKET_KEYS = ['contentType', 'sourceTier', 'lang', 'authorType'];
 const STALE_DAYS = 180; // methodology: labels expire; re-validate on a cadence.
 
 // Returns { errors: [], warnings: [] }.
@@ -40,9 +40,13 @@ function validateGold(g, { strict = false, now = Date.now() } = {}) {
     }
   }
 
-  // buckets.
+  // buckets: all four axes present and each a value from the canonical enum.
   if (!g.buckets || typeof g.buckets !== 'object') E('missing buckets');
-  else for (const k of BUCKET_KEYS) if (!g.buckets[k]) E(`buckets.${k} missing`);
+  else for (const k of BUCKET_KEYS) {
+    const v = g.buckets[k];
+    if (!v) E(`buckets.${k} missing`);
+    else if (!validBucket(k, v)) E(`buckets.${k} = "${v}" not in enum [${BUCKETS[k].join(', ')}]`);
+  }
 
   // overall-trust + tier (product-score gold, Part 3).
   if (!Number.isInteger(g.overallTrust) || g.overallTrust < 0 || g.overallTrust > 100) E(`overallTrust must be int 0-100, got ${g.overallTrust}`);

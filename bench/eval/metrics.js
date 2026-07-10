@@ -156,9 +156,11 @@ function iaaKappa(agent, goldMap) {
 }
 
 // ---- Part 3: product-score metrics ----
+// Expected tier band per bucket value (canonical spellings, see lib/buckets.js).
+// Values with no agreed band are omitted — they're skipped from pass-rate.
 const EXPECTED_TIER = {
-  contentType: { satire: ['red'], tabloid: ['red'], gossip: ['red'], 'press-release': ['orange', 'yellow'], 'state-propaganda': ['red', 'orange'] },
-  sourceTier: { 'public-broadcaster': ['green'], wire: ['green'], hyperpartisan: ['orange'], fringe: ['red', 'orange'], conspiracy: ['red'] },
+  contentType: { satire: ['red'], 'tabloid-gossip': ['red'], 'press-release': ['orange', 'yellow'], 'state-propaganda': ['red', 'orange'] },
+  sourceTier: { 'public-broadcaster': ['green'], wire: ['green'], hyperpartisan: ['orange'], 'fringe-conspiracy': ['red', 'orange'] },
 };
 
 function productMetrics(records, goldMap) {

@@ -5,6 +5,7 @@
   "description": "Benchmark harness for the Legit agent pipeline (Milestone 2: generator + offline eval).",
   "scripts": {
     "extract": "node corpus/extract.js",
+    "build-corpus": "node corpus/build-corpus.js",
     "run": "node generator/run.js --corpus corpus/corpus.json",
     "selftest": "node selftest.js",
     "validate-gold": "node gold/validate-gold.js",
