@@ -1,5 +1,5 @@
 {
-  "_comment": "Example / pilot gold label. annotators.a and .b are the two raw independent labels; gold is the adjudicated result. overallTrust + goldTier are the product-score gold (Part 3). Replace with real dual-annotator labels during the dry-run of 15.",
+  "_comment": "Example / pilot gold label. annotators.a and .b are the two raw independent labels; gold is the adjudicated result. overallTrust + goldTier are the product-score gold (Part 3). Should replace with real dual-annotator labels.",
   "slug": "bbc-com-news-articles-c5yzm8m4peeo",
   "url": "https://www.bbc.com/news/articles/c5yzm8m4peeo",
   "labelDate": "2026-07-10",

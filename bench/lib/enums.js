@@ -8,7 +8,8 @@
  * ratingToScore value instead (see scripts/utils.js), so it also covers off-scale
  * ratings. Off-scale ratings (SATIRE / ENTERTAINMENT_GOSSIP) are valid for an
  * agent but sit outside its ordinal ladder — excluded from ordinal-distance
- * metrics, handled in the product bucket/tier metrics (Part 3) instead.
+ * metrics, scored instead by their own precision/recall (metrics.offScaleDetection,
+ * Part 2) plus the product bucket/tier metrics (Part 3).
  */
 
 // Canonical agent name -> ordinal ladder (worst -> best).

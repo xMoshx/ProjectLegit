@@ -1,18 +1,18 @@
 /**
- * Offline metrics (Part 2/3/4). Pure functions over the prediction JSONL ISOC
- * returns + our gold files. No API, no key. This is the eval half we run
+ * Offline metrics (Part 2/3/4). Pure functions over the prediction JSONL
+ *  + our gold files. No API, no key. This is the eval half we run
  * ourselves. `computeAll` is the single computation entry point; report.js and the
  * CLI both consume its output so numbers are never derived twice.
  *
  * Usage:
  *   node metrics.js [out/predictions.jsonl] [--gold gold/]
- *
+ * 
  * D6: every per-agent metric reads the rating HOLDER (the background verifier for
  * source/consensus), never the weight-0 formatter echo (see enums.HOLDER).
  */
 const fs = require('fs');
 const path = require('path');
-const { AGENTS, LADDER, HOLDER, CRITICAL, rank } = require('../lib/enums');
+const { AGENTS, LADDER, OFF_SCALE, HOLDER, CRITICAL, rank } = require('../lib/enums');
 const P = require('../lib/paths');
 
 // ---- small stats helpers ----
@@ -69,7 +69,7 @@ function perAgentMetrics(records, goldMap, score) {
       if (!gold || !gold.gold) continue;
       const gr = gold.gold[agent];
       const pr = predRatingOf(rec, agent);
-      if (gr === undefined || pr === undefined) continue;
+      if (!gr || pr === undefined) continue; // !gr skips undefined + "" (unfilled gold stub)
       n += 1;
       gPrev[gr] = (gPrev[gr] || 0) + 1;
       (confusion[gr] = confusion[gr] || {})[pr] = (confusion[gr][pr] || 0) + 1;
@@ -96,9 +96,36 @@ function perAgentMetrics(records, goldMap, score) {
       confusion,
       unparseable,
       offScale,
+      offScaleDetection: offScaleDetection(agent, confusion),
       parseFailRate: n ? unparseable / n : 0,
       critical: criticalClass(agent, records, goldMap),
       humanIAAKappa: iaaKappa(agent, goldMap),
+    };
+  }
+  return out;
+}
+
+/**
+ * Off-scale detection (Part 2). SATIRE / ENTERTAINMENT_GOSSIP sit outside the
+ * ordinal ladder, so ordinal MAE/κ can't say whether the agent *recognized* them.
+ * This does: per off-scale class, precision (of preds calling it X, share gold X)
+ * and recall (of gold X, share predicted X), read straight from the confusion map
+ * already collected — no extra pass. Returns null for agents with no off-scale set.
+ */
+function offScaleDetection(agent, confusion) {
+  const classes = OFF_SCALE[agent];
+  if (!classes || !classes.length) return null;
+  const out = {};
+  for (const k of classes) {
+    const tp = confusion[k]?.[k] || 0;
+    const goldTotal = Object.values(confusion[k] || {}).reduce((a, b) => a + b, 0); // recall denom
+    const predTotal = Object.values(confusion).reduce((a, row) => a + (row[k] || 0), 0); // precision denom
+    out[k] = {
+      nGold: goldTotal,
+      nPred: predTotal,
+      tp,
+      precision: predTotal ? tp / predTotal : null,
+      recall: goldTotal ? tp / goldTotal : null,
     };
   }
   return out;
@@ -114,7 +141,7 @@ function criticalClass(agent, records, goldMap) {
     if (!gold || !gold.gold) continue;
     const gr = gold.gold[agent];
     const pr = predRatingOf(rec, agent);
-    if (gr === undefined || pr === undefined) continue;
+    if (!gr || pr === undefined) continue; // skip unfilled gold stub
     pairs.push([gr, pr]);
   }
   if (cfg.type === 'falseTrust') {

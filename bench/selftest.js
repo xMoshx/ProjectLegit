@@ -17,6 +17,7 @@ const { loadExtension } = require('./lib/load-extension');
 const { runFixture, runKey, makeCaller } = require('./generator/run');
 const { makeThrottle } = require('./generator/gemini');
 const { validateGold } = require('./gold/validate-gold');
+const { goldSkeleton } = require('./corpus/build-corpus');
 const { computeAll } = require('./eval/metrics');
 const P = require('./lib/paths');
 
@@ -116,6 +117,27 @@ function testValidateGold() {
   console.log('✓ (5) validate-gold accepts good, rejects broken');
 }
 
+function testGoldSkeleton() {
+  const article = {
+    fixture: 'x', gold: 'x',
+    buckets: { contentType: 'hard-news', sourceTier: 'wire', lang: 'en', authorType: 'staff-journalist' },
+  };
+  const skel = goldSkeleton(article, { url: 'https://example.com/x' });
+  assert.strictEqual(skel.slug, 'x', '(8) skeleton slug');
+  assert.strictEqual(skel.url, 'https://example.com/x', '(8) skeleton url from fixture');
+  assert.deepStrictEqual(skel.buckets, article.buckets, '(8) skeleton copies buckets');
+  // Empty skeleton MUST fail validation — an unfilled gold can't sneak into metrics.
+  assert(validateGold(skel).errors.length > 0, '(8) empty skeleton must fail validation');
+  // Fill the judgment fields → same skeleton now passes.
+  skel.labelDate = new Date().toISOString().slice(0, 10);
+  skel.overallTrust = 80; skel.goldTier = 'green';
+  const full = { source: 'CREDIBLE', author: 'JOURNALIST', consensus: 'CORROBORATED', headline: 'ACCURATE', bias: 'BALANCED', style: 'PROFESSIONAL' };
+  skel.annotators = { a: { ...full }, b: { ...full } };
+  skel.gold = { ...full };
+  assert.strictEqual(validateGold(skel).errors.length, 0, '(8) filled skeleton must pass validation');
+  console.log('✓ (8) gold skeleton: pre-fills known fields, fails empty, passes filled');
+}
+
 function testMetrics(ext) {
   const goldMap = {
     S1: {
@@ -148,6 +170,33 @@ function testMetrics(ext) {
   assert.strictEqual(m.product.buckets['sourceTier:public-broadcaster'].pass, 2, '(6) bucket pass');
   assert.strictEqual(m.product.tierConfusion.green.green, 2, '(6) tier confusion');
   console.log('✓ (6) metrics: MAE, off-by-1, quad-κ, flip, stddev, Brier, bucket, tier-confusion');
+
+  // Unfilled gold stub ("" rating) must NOT count — no n/offScale inflation.
+  const stubGold = { S1: goldMap.S1, S2: { slug: 'S2', gold: { source: '' } } };
+  const recs2 = records.concat([{ slug: 'S2', run: 1, lang: 'en', tier: 'green', finalScore: 90, agents: agentsWith('BALANCED') }]);
+  const m2 = computeAll(recs2, stubGold, { score: ext.ratingToScore });
+  assert.strictEqual(m2.perAgent.source.n, 2, `(6) empty-stub gold must not inflate n, got ${m2.perAgent.source.n}`);
+  assert.strictEqual(m2.perAgent.source.offScale, 0, `(6) empty-stub gold must not count as off-scale, got ${m2.perAgent.source.offScale}`);
+  console.log('✓ (6b) unfilled gold stub skipped, not counted');
+}
+
+function testOffScaleDetection(ext) {
+  // OS1 gold=SATIRE: one pred SATIRE (tp), one pred CREDIBLE (recall miss).
+  // OS2 gold=CREDIBLE: pred SATIRE (false positive → drags precision).
+  const goldMap = {
+    OS1: { slug: 'OS1', gold: { source: 'SATIRE' } },
+    OS2: { slug: 'OS2', gold: { source: 'CREDIBLE' } },
+  };
+  const rec = (slug, run, srcRating) =>
+    ({ slug, run, lang: 'en', tier: 'red', finalScore: 10, agents: [{ id: 'source-verify', rating: srcRating }] });
+  const records = [rec('OS1', 1, 'SATIRE'), rec('OS1', 2, 'CREDIBLE'), rec('OS2', 1, 'SATIRE')];
+  const m = computeAll(records, goldMap, { score: ext.ratingToScore });
+  const s = m.perAgent.source.offScaleDetection.SATIRE;
+  assert.strictEqual(s.tp, 1, `(7) satire tp ${s.tp}`);
+  assert.strictEqual(s.recall, 0.5, `(7) satire recall ${s.recall}`);   // 1 of 2 gold-satire caught
+  assert.strictEqual(s.precision, 0.5, `(7) satire precision ${s.precision}`); // 1 of 2 satire-preds right
+  assert.strictEqual(m.perAgent.author.offScaleDetection, null, '(7) no off-scale for author');
+  console.log('✓ (7) off-scale detection: satire/gossip precision + recall');
 }
 
 async function main() {
@@ -157,7 +206,9 @@ async function main() {
   testResume();
   await testGroundingModes();
   testValidateGold();
+  testGoldSkeleton();
   testMetrics(ext);
+  testOffScaleDetection(ext);
   console.log('\n✓ selftest passed');
 }
 

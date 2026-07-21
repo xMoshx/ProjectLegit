@@ -1,0 +1,14 @@
+{
+  "_comment": "PLACEHOLDER labels — NOT real dual-annotator judgments. Filled only to smoke-test the eval pipeline. Replace with real labels before any reported numbers.",
+  "slug": "en-wikipedia-org-wiki-journalism",
+  "url": "https://en.wikipedia.org/wiki/Journalism",
+  "labelDate": "2026-07-21",
+  "buckets": { "contentType": "reference", "sourceTier": "mainstream", "lang": "en", "authorType": "anonymous" },
+  "overallTrust": 72,
+  "goldTier": "green",
+  "annotators": {
+    "a": { "source": "CREDIBLE", "author": "ANONYMOUS", "consensus": "CORROBORATED", "headline": "ACCURATE", "bias": "BALANCED", "style": "PROFESSIONAL" },
+    "b": { "source": "CREDIBLE", "author": "ANONYMOUS", "consensus": "PLAUSIBLE", "headline": "ACCURATE", "bias": "BALANCED", "style": "ADEQUATE" }
+  },
+  "gold": { "source": "CREDIBLE", "author": "ANONYMOUS", "consensus": "CORROBORATED", "headline": "ACCURATE", "bias": "BALANCED", "style": "PROFESSIONAL" }
+}

@@ -36,6 +36,24 @@ function markdown(m) {
   for (const a of AGENTS) L.push(`- **${a}**: ${JSON.stringify(m.perAgent[a].prevalence)}`);
   L.push('');
 
+  // Part 2 — off-scale detection (satire / entertainment-gossip)
+  const offRows = [];
+  for (const a of AGENTS) {
+    const d = m.perAgent[a].offScaleDetection;
+    if (!d) continue;
+    for (const [klass, s] of Object.entries(d)) {
+      offRows.push(`| ${a} | ${klass} | ${s.nGold} | ${s.nPred} | ${s.tp} | ${pct(s.precision)} | ${pct(s.recall)} |`);
+    }
+  }
+  if (offRows.length) {
+    L.push('### Off-scale detection (satire / entertainment-gossip)', '');
+    L.push('_Ratings outside the ordinal ladder — precision/recall on whether the agent recognized the genre._', '');
+    L.push('| agent | class | gold n | pred n | tp | precision | recall |');
+    L.push('|---|---|---|---|---|---|---|');
+    for (const row of offRows) L.push(row);
+    L.push('');
+  }
+
   // Part 3
   const p = m.product;
   L.push('## Part 3 — Product score', '');
@@ -74,7 +92,13 @@ function csv(m) {
     const x = m.perAgent[a];
     rows.push([a, x.n, f(x.mae, 3), f(x.signedError, 3), f(x.exactAccuracy, 3), f(x.offByOneAccuracy, 3), f(x.quadKappa, 3), f(x.humanIAAKappa, 3), f(x.parseFailRate, 3), x.critical?.metric || '', x.critical ? f(x.critical.value, 3) : '']);
   }
-  return rows.map((r) => r.join(',')).join('\n');
+  const off = [[], ['off-scale detection'], ['agent', 'class', 'gold_n', 'pred_n', 'tp', 'precision', 'recall']];
+  for (const a of AGENTS) {
+    const d = m.perAgent[a].offScaleDetection;
+    if (!d) continue;
+    for (const [klass, s] of Object.entries(d)) off.push([a, klass, s.nGold, s.nPred, s.tp, f(s.precision, 3), f(s.recall, 3)]);
+  }
+  return rows.concat(off).map((r) => r.join(',')).join('\n');
 }
 
 function main() {

@@ -1,5 +1,5 @@
 /**
- * Scaffolds corpus.json from the fixtures on disk so you never hand-write article
+ * Scaffolds corpus.json from the fixtures on disk so we never hand-write article
  * URLs/paths. Idempotent: scans corpus/fixtures/*.json, adds an entry per fixture
  * (fixture + gold ref + empty bucket stubs), and PRESERVES anything you already
  * filled (buckets, per-article langs/runs, gold). Re-run it every time you add
@@ -10,21 +10,58 @@
  * how many of each bucket value you have) before you commit to labeling.
  *
  * Usage:
- *   node corpus/build-corpus.js          # update corpus.json + print coverage
- *   node corpus/build-corpus.js --check  # report only, write nothing (CI-friendly)
+ *   node corpus/build-corpus.js                 # update corpus.json + print coverage
+ *   node corpus/build-corpus.js --check         # report only, write nothing (CI-friendly)
+ *   node corpus/build-corpus.js --scaffold-gold # also write a stub gold file per article missing one
  */
 const fs = require('fs');
 const path = require('path');
 const P = require('../lib/paths');
+const { AGENTS } = require('../lib/enums');
 const { BUCKETS, BUCKET_KEYS } = require('../lib/buckets');
 
 const emptyBuckets = () => Object.fromEntries(BUCKET_KEYS.map((k) => [k, '']));
+
+// Blueprint gold file: machine fills what it knows (slug, url, buckets); the
+// judgment fields are stubbed empty so validate-gold FAILS until a human fills
+// them — an empty gold can never silently sneak into a metric.
+function goldSkeleton(article, fixtureData) {
+  const stubSet = () => Object.fromEntries(AGENTS.map((a) => [a, '']));
+  return {
+    _comment: 'SCAFFOLD — fill labelDate, overallTrust, goldTier, both raw annotators, and adjudicated gold. Then: node gold/validate-gold.js',
+    slug: article.gold || article.fixture,
+    url: (fixtureData && fixtureData.url) || '',
+    labelDate: '',
+    buckets: article.buckets || emptyBuckets(),
+    overallTrust: null,
+    goldTier: '',
+    annotators: { a: stubSet(), b: stubSet() },
+    gold: stubSet(),
+  };
+}
+
+// Write a skeleton for every article with no gold file. Never overwrites.
+function scaffoldGold(articles, { check = false } = {}) {
+  fs.mkdirSync(P.GOLD, { recursive: true });
+  const written = [];
+  for (const a of articles) {
+    const slug = a.gold || a.fixture;
+    const dest = path.join(P.GOLD, `${slug}.json`);
+    if (fs.existsSync(dest)) continue;
+    const fx = load(path.join(P.FIXTURES, `${a.fixture}.json`), null);
+    if (!check) fs.writeFileSync(dest, JSON.stringify(goldSkeleton(a, fx), null, 2) + '\n');
+    written.push(slug);
+  }
+  if (written.length) console.log(`\n${check ? 'would scaffold' : 'scaffolded'} gold: ${written.join(', ')}`);
+  else console.log('\ngold scaffold: nothing to write (all articles have gold) ✓');
+  return written;
+}
 
 function load(file, fallback) {
   return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : fallback;
 }
 
-function build({ check = false } = {}) {
+function build({ check = false, scaffold = false } = {}) {
   if (!fs.existsSync(P.FIXTURES)) { console.error(`No fixtures dir at ${P.FIXTURES}. Run extract.js first.`); process.exit(1); }
   const slugs = fs.readdirSync(P.FIXTURES).filter((f) => f.endsWith('.json')).map((f) => path.basename(f, '.json'));
 
@@ -52,6 +89,7 @@ function build({ check = false } = {}) {
   }
 
   reportCoverage(corpus.articles);
+  if (scaffold) scaffoldGold(corpus.articles, { check });
   return corpus;
 }
 
@@ -82,6 +120,6 @@ function reportCoverage(articles) {
   if (!noGold.length && !unfilled.length) console.log('\nall articles have gold + full buckets ✓');
 }
 
-if (require.main === module) build({ check: process.argv.includes('--check') });
+if (require.main === module) build({ check: process.argv.includes('--check'), scaffold: process.argv.includes('--scaffold-gold') });
 
-module.exports = { build, reportCoverage };
+module.exports = { build, reportCoverage, goldSkeleton, scaffoldGold };
