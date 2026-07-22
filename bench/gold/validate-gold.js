@@ -1,8 +1,9 @@
 /**
- * Gold-file validator (Part 1). A gold file records, per article: two raw
- * annotator label sets (for IAA), the adjudicated gold, an overall-trust 0-100,
- * gold tier, labelDate, and bucket tags. This checks the schema the metrics rely
- * on — enum membership, both raw labels + gold present, valid non-stale date,
+ * Gold-file validator (Part 1). A gold file records, per article: the adjudicated
+ * gold label set, an overall-trust 0-100, gold tier, labelDate, and bucket tags.
+ * Optionally two raw annotator label sets (annotators.a/.b) for IAA — omit them for
+ * single-annotator gold. This checks the schema the metrics rely on — enum
+ * membership, gold present (annotators complete if present), valid non-stale date,
  * buckets present — so a malformed label can't silently poison a metric.
  *
  * Usage:
@@ -52,15 +53,21 @@ function validateGold(g, { strict = false, now = Date.now() } = {}) {
   if (!Number.isInteger(g.overallTrust) || g.overallTrust < 0 || g.overallTrust > 100) E(`overallTrust must be int 0-100, got ${g.overallTrust}`);
   if (!TIERS.includes(g.goldTier)) E(`goldTier must be one of ${TIERS.join('/')}, got ${g.goldTier}`);
 
-  // Two raw annotators (IAA) + adjudicated gold, each a valid enum per agent.
+  // Adjudicated gold required; raw annotators optional (only feed IAA/ceiling).
+  // Single-annotator labels (e.g. one professional labeller) omit annotators — that's fine,
+  // IAA just won't compute. If annotators is present it must be the full a+b pair.
   const a = g.annotators || {};
-  if (!a.a || !a.b) E('annotators.a and annotators.b (two raw label sets) both required for IAA');
+  if (g.annotators) {
+    if (!a.a || !a.b) E('annotators present but incomplete — both a and b required for IAA (omit annotators entirely for single-annotator gold)');
+  } else {
+    warnings.push('no annotators — IAA/human ceiling will be skipped (single-annotator gold)');
+  }
   if (!g.gold) E('missing adjudicated gold');
 
   for (const agent of AGENTS) {
     const allowed = validRatings(agent);
     for (const [who, set] of [['annotator.a', a.a], ['annotator.b', a.b], ['gold', g.gold]]) {
-      if (!set) continue; // absence already flagged above
+      if (!set) continue; // absent annotator sets are allowed (optional)
       const v = set[agent];
       if (v === undefined) E(`${who}.${agent} missing`);
       else if (!allowed.includes(v)) E(`${who}.${agent} = "${v}" not in enum [${allowed.join(', ')}]`);

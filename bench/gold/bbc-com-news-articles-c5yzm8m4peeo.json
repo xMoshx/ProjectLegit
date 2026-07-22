@@ -3,7 +3,7 @@
   "slug": "bbc-com-news-articles-c5yzm8m4peeo",
   "url": "https://www.bbc.com/news/articles/c5yzm8m4peeo",
   "labelDate": "2026-07-10",
-  "buckets": { "contentType": "hard-news", "sourceTier": "public-broadcaster", "lang": "en", "authorType": "staff-journalist" },
+  "buckets": { "contentType": "hard-news", "sourceTier": "public-broadcaster", "lang": "en", "authorType": "journalist" },
   "overallTrust": 88,
   "goldTier": "green",
   "annotators": {

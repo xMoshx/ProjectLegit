@@ -45,8 +45,9 @@ bench/
   eval/        the offline half
     metrics.js       Part 2/3/4 numbers
     report.js        metrics → markdown + CSV
-    replay.js        D8: re-score old ratings through map v1/v2
-    maps.js          versioned score maps
+    replay.js        D8: re-score old ratings through map v1/v2 (+ weight vN)
+    maps.js          versioned rating→score maps
+    weights.js       versioned agent-weight vectors
   gold/        ground truth
     validate-gold.js schema checker
     <slug>.json      human labels per article
@@ -91,7 +92,7 @@ can't infer from a URL). One file defines the whole run, not CLI flags:
   "articles": [
     { "fixture": "bbc-...", "gold": "bbc-...",
       "buckets": { "contentType": "hard-news", "sourceTier": "public-broadcaster",
-                   "lang": "en", "authorType": "staff-journalist" } }
+                   "lang": "en", "authorType": "journalist" } }
   ]
 }
 ```
@@ -105,7 +106,7 @@ product pass-rate bands in `metrics.js`):
 | `contentType` | hard-news, opinion, satire, tabloid-gossip, clickbait-aggregator, press-release, state-propaganda, reference |
 | `sourceTier` | wire, public-broadcaster, mainstream, hyperpartisan, fringe-conspiracy, unknown-small |
 | `lang` | en, he |
-| `authorType` | bylined-expert, staff-journalist, anonymous, pseudonymous, known-bad-actor |
+| `authorType` | expert, journalist, citizen-journalist, anonymous, pseudonymous, suspicious |
 
 They do two jobs: **stratify** the corpus (sample across the axes that break the
 agents, not random 120) and drive the **product bucket pass-rate** (satire→red,
@@ -318,15 +319,18 @@ node eval/report.js     # → out/report.md + out/report.csv (the human artifact
 cause: `predictions.jsonl` has no `slug` (old format) or no gold file matches the
 slug. See "Reading the metrics" below for what each number means.
 
-### 5. Map replay — `eval/replay.js` (offline, no key)
+### 5. Map / weight replay — `eval/replay.js` (offline, no key)
 
 ```bash
-node eval/replay.js --maps v1,v2
+node eval/replay.js --maps v1,v2                 # A/B two rating→score maps (maps.js)
+node eval/replay.js --maps v1,v2 --weights v2    # ...under a chosen agent-weight vector (weights.js)
 ```
 
 **Expect:** per-record final-score + tier under each map version and the delta —
 "did the score-map rebuild move anything?" — from the *same* captured ratings, zero
-API. This is the A/B that validates a map change without re-generating.
+API. `--weights vN` (default `v1` = live `enums.WEIGHTS`) re-weights the agent mean
+from `eval/weights.js`, so you can A/B a re-weighting the same way. This is the A/B
+that validates a map or weight change without re-generating.
 
 ### Self-check — `selftest.js` (offline, no key)
 
@@ -422,7 +426,7 @@ Tier bands (final score → tier): **green ≥80, yellow ≥60, orange ≥40, re
 | `gold/validate-gold.js` | check human labels |
 | `eval/metrics.js` | all the numbers |
 | `eval/report.js` | numbers → md/csv |
-| `eval/replay.js` + `maps.js` | re-score through map versions |
+| `eval/replay.js` + `maps.js` + `weights.js` | re-score through map / weight versions |
 | `selftest.js` | offline proof it all works |
 
 ---

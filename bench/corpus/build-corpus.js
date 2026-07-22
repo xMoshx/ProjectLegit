@@ -28,14 +28,13 @@ const emptyBuckets = () => Object.fromEntries(BUCKET_KEYS.map((k) => [k, '']));
 function goldSkeleton(article, fixtureData) {
   const stubSet = () => Object.fromEntries(AGENTS.map((a) => [a, '']));
   return {
-    _comment: 'SCAFFOLD — fill labelDate, overallTrust, goldTier, both raw annotators, and adjudicated gold. Then: node gold/validate-gold.js',
+    _comment: 'SCAFFOLD — fill labelDate, overallTrust, goldTier, and adjudicated gold. Then: node gold/validate-gold.js. (Optional: add annotators.a/.b for IAA if dual-annotated.)',
     slug: article.gold || article.fixture,
     url: (fixtureData && fixtureData.url) || '',
     labelDate: '',
     buckets: article.buckets || emptyBuckets(),
     overallTrust: null,
     goldTier: '',
-    annotators: { a: stubSet(), b: stubSet() },
     gold: stubSet(),
   };
 }

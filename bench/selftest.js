@@ -100,7 +100,7 @@ async function testGroundingModes() {
 function testValidateGold() {
   const good = {
     slug: 's', url: 'u', labelDate: new Date().toISOString().slice(0, 10),
-    buckets: { contentType: 'hard-news', sourceTier: 'wire', lang: 'en', authorType: 'staff-journalist' },
+    buckets: { contentType: 'hard-news', sourceTier: 'wire', lang: 'en', authorType: 'journalist' },
     overallTrust: 80, goldTier: 'green',
     annotators: {
       a: { source: 'CREDIBLE', author: 'JOURNALIST', consensus: 'CORROBORATED', headline: 'ACCURATE', bias: 'BALANCED', style: 'PROFESSIONAL' },
@@ -109,6 +109,18 @@ function testValidateGold() {
     gold: { source: 'CREDIBLE', author: 'JOURNALIST', consensus: 'CORROBORATED', headline: 'ACCURATE', bias: 'BALANCED', style: 'PROFESSIONAL' },
   };
   assert.strictEqual(validateGold(good).errors.length, 0, '(5) good gold should pass');
+
+  // Single-annotator gold: no annotators field → valid, warns only.
+  const solo = JSON.parse(JSON.stringify(good));
+  delete solo.annotators;
+  const soloRes = validateGold(solo);
+  assert.strictEqual(soloRes.errors.length, 0, '(5) gold without annotators should pass');
+  assert(soloRes.warnings.some((w) => /annotator/i.test(w)), '(5) missing annotators should warn');
+
+  // Partial annotators (a only) → still an error.
+  const partial = JSON.parse(JSON.stringify(good));
+  delete partial.annotators.b;
+  assert(validateGold(partial).errors.length > 0, '(5) incomplete annotators must fail');
 
   const bad = JSON.parse(JSON.stringify(good));
   delete bad.labelDate;
@@ -120,7 +132,7 @@ function testValidateGold() {
 function testGoldSkeleton() {
   const article = {
     fixture: 'x', gold: 'x',
-    buckets: { contentType: 'hard-news', sourceTier: 'wire', lang: 'en', authorType: 'staff-journalist' },
+    buckets: { contentType: 'hard-news', sourceTier: 'wire', lang: 'en', authorType: 'journalist' },
   };
   const skel = goldSkeleton(article, { url: 'https://example.com/x' });
   assert.strictEqual(skel.slug, 'x', '(8) skeleton slug');
@@ -142,7 +154,7 @@ function testMetrics(ext) {
   const goldMap = {
     S1: {
       slug: 'S1', overallTrust: 90, goldTier: 'green',
-      buckets: { contentType: 'hard-news', sourceTier: 'public-broadcaster', lang: 'en', authorType: 'staff-journalist' },
+      buckets: { contentType: 'hard-news', sourceTier: 'public-broadcaster', lang: 'en', authorType: 'journalist' },
       gold: { source: 'HIGHLY_CREDIBLE', author: 'JOURNALIST', consensus: 'CORROBORATED', headline: 'ACCURATE', bias: 'BALANCED', style: 'PROFESSIONAL' },
     },
   };

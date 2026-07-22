@@ -4,28 +4,32 @@
  * change help?" and validates the pending score-map rebuild — unlimited map
  * versions from one generation run, zero API calls.
  *
- * Weighting mirrors the runner: weighted mean over the scored agents by their live
- * weight (enums.WEIGHTS), using each record's captured *-format / scored rating.
+ * Weighting mirrors the runner: weighted mean over the scored agents, using a
+ * versioned weight vector (weights.js, --weights vN, default v1 = live) applied to
+ * each record's captured *-format / scored rating.
  *
  * Usage:
- *   node replay.js [out/predictions.jsonl] [--maps v1,v2] [--gold gold/]
+ *   node replay.js [out/predictions.jsonl] [--maps v1,v2] [--weights v1] [--gold gold/]
  */
 const fs = require('fs');
 const path = require('path');
 const { MAPS, scoreWith } = require('./maps');
+const { WEIGHT_SETS } = require('./weights');
 const { loadJsonl, loadGold } = require('./metrics');
-const { WEIGHTS } = require('../lib/enums');
 const P = require('../lib/paths');
 
-// The scored prediction agent ids and their weights (formatter holds the weight).
-const SCORED = { 'source-format': WEIGHTS.source, author: WEIGHTS.author, 'consensus-format': WEIGHTS.consensus, headline: WEIGHTS.headline, bias: WEIGHTS.bias, style: WEIGHTS.style };
+// Map a weight vector (canonical agent -> weight) to the scored prediction agent
+// ids that hold the score (the *-format formatter holds source/consensus).
+function scoredFor(w) {
+  return { 'source-format': w.source, author: w.author, 'consensus-format': w.consensus, headline: w.headline, bias: w.bias, style: w.style };
+}
 
 function tierFor(s) { return s >= 80 ? 'green' : s >= 60 ? 'yellow' : s >= 40 ? 'orange' : 'red'; }
 
-function scoreRecord(rec, map) {
+function scoreRecord(rec, map, scored) {
   let tot = 0, w = 0;
   for (const a of rec.agents) {
-    const weight = SCORED[a.id];
+    const weight = scored[a.id];
     if (!weight) continue;
     tot += scoreWith(map, a.rating) * weight;
     w += weight;
@@ -36,20 +40,28 @@ function scoreRecord(rec, map) {
 
 function main() {
   const args = process.argv.slice(2);
-  const jsonl = args.find((a) => !a.startsWith('--')) || P.PREDICTIONS;
-  const versions = (args.includes('--maps') ? args[args.indexOf('--maps') + 1] : 'v1,v2').split(',');
-  const goldDir = args.includes('--gold') ? args[args.indexOf('--gold') + 1] : P.GOLD;
+  const flag = (name, def) => (args.includes(name) ? args[args.indexOf(name) + 1] : def);
+  const VALUE_FLAGS = ['--maps', '--weights', '--gold'];
+  // positional jsonl path = first non-flag arg that isn't a value consumed by a value-flag.
+  const consumed = new Set(VALUE_FLAGS.map((f) => args.indexOf(f) + 1).filter((i) => i > 0));
+  const jsonl = args.find((a, i) => !a.startsWith('--') && !consumed.has(i)) || P.PREDICTIONS;
+  const versions = flag('--maps', 'v1,v2').split(',');
+  const wv = flag('--weights', 'v1');
+  const goldDir = flag('--gold', P.GOLD);
   const gold = loadGold(goldDir);
 
   const records = loadJsonl(jsonl).filter((r) => r.type !== 'provenance' && Array.isArray(r.agents));
   const [va, vb] = versions;
   if (!MAPS[va] || !MAPS[vb]) { console.error(`unknown map version(s): ${versions.join(',')} (have ${Object.keys(MAPS).join(', ')})`); process.exit(1); }
+  if (!WEIGHT_SETS[wv]) { console.error(`unknown weight version: ${wv} (have ${Object.keys(WEIGHT_SETS).join(', ')})`); process.exit(1); }
+  const scored = scoredFor(WEIGHT_SETS[wv]);
 
+  console.log(`weights ${wv} | maps ${va} vs ${vb}`);
   console.log(`slug | run | lang | ${va} | ${vb} | Δscore | tier ${va}->${vb} | goldTier`);
   let moved = 0, tierMoved = 0, closerToGold = 0, gradedCloser = 0;
   for (const rec of records) {
-    const A = scoreRecord(rec, MAPS[va]);
-    const B = scoreRecord(rec, MAPS[vb]);
+    const A = scoreRecord(rec, MAPS[va], scored);
+    const B = scoreRecord(rec, MAPS[vb], scored);
     const d = B.score - A.score;
     if (d !== 0) moved += 1;
     if (A.tier !== B.tier) tierMoved += 1;
