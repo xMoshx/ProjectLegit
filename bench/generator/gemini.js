@@ -13,7 +13,9 @@
  *    ({rating, explanation}) and retire the RATING: regex for that call. Falls
  *    back to the free-text path when no schema is given.
  */
-const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+// Must match the extension's default (scripts/background.js) or the benchmark
+// measures a model the product doesn't ship.
+const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const KEY = process.env.GEMINI_API_KEY;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

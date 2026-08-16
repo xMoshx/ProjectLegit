@@ -320,6 +320,8 @@ INSTRUCTIONS:
 For supporting: [[SOURCE::SOURCE_NAME::Article_Title::Quote::SOURCE]]
 For contradicting: [[CONTRA::SOURCE_NAME::Article_Title::Quote::CONTRA]]
 
+**IMPORTANT**: Write the explanation in ${lang}.
+
 Final Output Structure:
 RATING: [Keep the original rating]
 EXPLANATION: [The original analysis with the formatted citations inserted]`
