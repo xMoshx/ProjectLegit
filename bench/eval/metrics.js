@@ -13,6 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const { AGENTS, LADDER, OFF_SCALE, HOLDER, CRITICAL, rank } = require('../lib/enums');
+const { deriveBuckets } = require('../lib/buckets');
 const P = require('../lib/paths');
 
 // ---- small stats helpers ----
@@ -99,7 +100,8 @@ function perAgentMetrics(records, goldMap, score) {
       offScaleDetection: offScaleDetection(agent, confusion),
       parseFailRate: n ? unparseable / n : 0,
       critical: criticalClass(agent, records, goldMap),
-      humanIAAKappa: iaaKappa(agent, goldMap),
+      criticalBySource: criticalBySourceReputation(agent, records, goldMap),
+      retestKappa: retestKappa(agent, goldMap),
     };
   }
   return out;
@@ -167,13 +169,57 @@ function criticalClass(agent, records, goldMap) {
   return null;
 }
 
-// Human-human quad-weighted kappa from the two raw annotator labels = the ceiling.
-function iaaKappa(agent, goldMap) {
+/**
+ * Shortcut probe: the same critical-class metric, split by source reputation.
+ *
+ * This is the direct measurement of the question a corpus-level correlation
+ * statistic can only approach indirectly — is the agent reasoning over the
+ * article, or keying on the outlet? Read the split per agent, because the answer
+ * depends on what that agent's prompt actually contains:
+ *
+ *  - `consensus` and `author` receive the domain AND the body (agents.js). A large
+ *    gap here — e.g. CONTRADICTS recall 70% on low-reputation sources but 20% on
+ *    high-reputation ones — means the agent is deferring to the outlet name rather
+ *    than checking the claim. That is a real model finding.
+ *  - `bias`, `style` and `headline` never see the domain, so their split should be
+ *    flat. A gap there is not a model finding: it says the CORPUS is confounded
+ *    (rhetorical load or veracity tracking source reputation), and the fix is
+ *    sampling, not prompting.
+ *
+ * Levels with no articles are omitted rather than reported as zero.
+ */
+function criticalBySourceReputation(agent, records, goldMap) {
+  if (!CRITICAL[agent]) return null;
+  const out = {};
+  for (const level of ['high', 'mixed', 'low', 'unrated']) {
+    const subGold = {};
+    for (const [slug, g] of Object.entries(goldMap)) {
+      if (deriveBuckets(g).sourceReputation === level) subGold[slug] = g;
+    }
+    const subRecords = records.filter((r) => subGold[r.slug]);
+    if (!subRecords.length) continue;
+    out[level] = criticalClass(agent, subRecords, subGold);
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * The ceiling. Ground truth is single-labeler (ISOC), so there is no
+ * inter-annotator agreement to compute; instead this is the SAME labeler's second
+ * pass over a subset (`retest`, 2+ weeks later, shuffled) against their own gold.
+ *
+ * Read it as a precision ceiling, not an accuracy one: a consistently biased
+ * labeler scores 1.0 here. It bounds how much of Legit's disagreement is task
+ * ambiguity vs model error — it cannot detect systematic labeler bias. The
+ * externally-anchored parts of gold (sourceRegistry lookups, published
+ * fact-checks behind `veracity`) are the guard against that.
+ */
+function retestKappa(agent, goldMap) {
   const ladder = LADDER[agent];
   const pairs = [];
   for (const g of Object.values(goldMap)) {
-    const a = g.annotators?.a?.[agent];
-    const b = g.annotators?.b?.[agent];
+    const a = g.gold?.[agent];
+    const b = g.retest?.[agent];
     if (a === undefined || b === undefined) continue;
     const ai = ladder.indexOf(a), bi = ladder.indexOf(b);
     if (ai < 0 || bi < 0) continue;
@@ -183,11 +229,22 @@ function iaaKappa(agent, goldMap) {
 }
 
 // ---- Part 3: product-score metrics ----
-// Expected tier band per bucket value (canonical spellings, see lib/buckets.js).
-// Values with no agreed band are omitted — they're skipped from pass-rate.
+// Expected tier band per DERIVED axis value (lib/buckets.js). Values with no
+// agreed band are omitted — they're skipped from the pass-rate rather than guessed.
+//
+// Deliberately sparse. Only claims we can defend as product requirements go here;
+// everything else is descriptive. Notably `veracity: no-factual-claim` (satire,
+// pure opinion) has NO band: whether a labeled Onion piece should score red is a
+// product policy decision, not a truth judgment, and it is not settled.
 const EXPECTED_TIER = {
-  contentType: { satire: ['red'], 'tabloid-gossip': ['red'], 'press-release': ['orange', 'yellow'], 'state-propaganda': ['red', 'orange'] },
-  sourceTier: { 'public-broadcaster': ['green'], wire: ['green'], hyperpartisan: ['orange'], 'fringe-conspiracy': ['red', 'orange'] },
+  veracity: {
+    // A story known to be false must not be presented as trustworthy.
+    'verified-false': ['red', 'orange'],
+  },
+  sourceReputation: {
+    high: ['green', 'yellow'],
+    low: ['orange', 'red'],
+  },
 };
 
 function productMetrics(records, goldMap) {
@@ -209,14 +266,15 @@ function productMetrics(records, goldMap) {
     meanGoldTrust: mean(bin.golds),
   }));
 
-  // Known-bucket pass-rate.
+  // Known-bucket pass-rate, over buckets derived from gold (never hand-tagged).
   const buckets = {};
   for (const rec of records) {
     const gold = goldMap[rec.slug];
-    if (!gold || !gold.buckets) continue;
+    if (!gold) continue;
+    const derived = deriveBuckets(gold);
     for (const dim of Object.keys(EXPECTED_TIER)) {
-      const val = gold.buckets[dim];
-      const expected = EXPECTED_TIER[dim][val];
+      const val = derived[dim];
+      const expected = val && EXPECTED_TIER[dim][val];
       if (!expected) continue;
       const key = `${dim}:${val}`;
       const bk = (buckets[key] = buckets[key] || { pass: 0, n: 0, expected });
@@ -225,20 +283,29 @@ function productMetrics(records, goldMap) {
     }
   }
 
-  // Tier confusion 4x4 + green-but-actually-red.
+  // Tier confusion 4x4 + the two false-trust headline numbers.
   const TIERS = ['green', 'yellow', 'orange', 'red'];
   const tierConfusion = {};
   let greenButRed = 0, tierN = 0;
+  // greenButFalse is the sharper of the two: painted green while the story is
+  // known false. greenButRed compares against a judged tier; this compares
+  // against an externally fact-checked truth value.
+  let greenButFalse = 0, falseN = 0;
   for (const rec of records) {
     const gold = goldMap[rec.slug];
-    if (!gold || !gold.goldTier) continue;
+    if (!gold) continue;
+    if (gold.veracity === 'verified-false') {
+      falseN += 1;
+      if (rec.tier === 'green') greenButFalse += 1;
+    }
+    if (!gold.goldTier) continue;
     tierN += 1;
     (tierConfusion[gold.goldTier] = tierConfusion[gold.goldTier] || {})[rec.tier] =
       (tierConfusion[gold.goldTier]?.[rec.tier] || 0) + 1;
     if (gold.goldTier === 'red' && rec.tier === 'green') greenButRed += 1;
   }
 
-  return { calibration, brier: mean(brier), buckets, tierConfusion, greenButRed, tierN, tiers: TIERS };
+  return { calibration, brier: mean(brier), buckets, tierConfusion, greenButRed, tierN, greenButFalse, falseN, tiers: TIERS };
 }
 
 // ---- Part 4: robustness ----

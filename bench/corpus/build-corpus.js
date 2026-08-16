@@ -1,13 +1,18 @@
 /**
  * Scaffolds corpus.json from the fixtures on disk so we never hand-write article
- * URLs/paths. Idempotent: scans corpus/fixtures/*.json, adds an entry per fixture
- * (fixture + gold ref + empty bucket stubs), and PRESERVES anything you already
- * filled (buckets, per-article langs/runs, gold). Re-run it every time you add
- * fixtures — it only appends the new ones.
+ * URLs/paths. Idempotent: scans corpus/fixtures/*.json, adds an entry per fixture,
+ * and PRESERVES anything you already filled (per-article langs/runs, gold ref).
+ * Re-run it every time you add fixtures — it only appends the new ones.
  *
- * Buckets stay for a human to fill: a URL can't tell you "satire" vs "hard-news".
- * The coverage report at the end shows the stratification gaps (what's still empty,
- * how many of each bucket value you have) before you commit to labeling.
+ * Bucket tags are no longer written here. The stratification axes are DERIVED from
+ * each article's gold file (lib/buckets.js), so the coverage report below reads
+ * gold/, not corpus.json. Empty cells tell you what the NEXT collection round
+ * should target — the corpus grows adaptively instead of needing perfect
+ * stratification up front.
+ *
+ * The report also prints Cramer's V for every axis pair. Axes exist to be
+ * attributable; if two of them are confounded (V > 0.30) a failure blamed on one
+ * is contestable. See docs/benchmark-axes.md.
  *
  * Usage:
  *   node corpus/build-corpus.js                 # update corpus.json + print coverage
@@ -18,21 +23,23 @@ const fs = require('fs');
 const path = require('path');
 const P = require('../lib/paths');
 const { AGENTS } = require('../lib/enums');
-const { BUCKETS, BUCKET_KEYS } = require('../lib/buckets');
+const { AXES, AXIS_VALUES, deriveBuckets, axisCorrelations } = require('../lib/buckets');
 
-const emptyBuckets = () => Object.fromEntries(BUCKET_KEYS.map((k) => [k, '']));
+const V_GATE = 0.30; // max acceptable Cramer's V between any two axes.
 
-// Blueprint gold file: machine fills what it knows (slug, url, buckets); the
-// judgment fields are stubbed empty so validate-gold FAILS until a human fills
-// them — an empty gold can never silently sneak into a metric.
+// Blueprint gold file: machine fills what it knows (slug, url); the judgment fields
+// are stubbed empty so validate-gold FAILS until a human fills them — an empty gold
+// can never silently sneak into a metric.
 function goldSkeleton(article, fixtureData) {
   const stubSet = () => Object.fromEntries(AGENTS.map((a) => [a, '']));
   return {
-    _comment: 'SCAFFOLD — fill labelDate, overallTrust, goldTier, and adjudicated gold. Then: node gold/validate-gold.js. (Optional: add annotators.a/.b for IAA if dual-annotated.)',
+    _comment: 'SCAFFOLD — fill labelDate, veracity, evidenceCount, sourceRegistry, overallTrust, goldTier, and gold. Then: node gold/validate-gold.js. (Optional: add `retest` if this article is in the consistency subset.)',
     slug: article.gold || article.fixture,
     url: (fixtureData && fixtureData.url) || '',
     labelDate: '',
-    buckets: article.buckets || emptyBuckets(),
+    veracity: '',
+    evidenceCount: null,
+    sourceRegistry: null,
     overallTrust: null,
     goldTier: '',
     gold: stubSet(),
@@ -74,7 +81,7 @@ function build({ check = false, scaffold = false } = {}) {
   let added = 0;
   for (const slug of slugs) {
     if (byFixture.has(slug)) continue;                 // preserve existing entry as-is
-    byFixture.set(slug, { fixture: slug, gold: slug, buckets: emptyBuckets() });
+    byFixture.set(slug, { fixture: slug, gold: slug });
     added += 1;
   }
   // keep only fixtures that still exist, in fixture order
@@ -92,33 +99,59 @@ function build({ check = false, scaffold = false } = {}) {
   return corpus;
 }
 
+/** Load each article's gold file and derive its axis values. */
+function derivedFor(articles) {
+  const rows = [];
+  const noGold = [];
+  for (const a of articles) {
+    const slug = a.gold || a.fixture;
+    const g = load(path.join(P.GOLD, `${slug}.json`), null);
+    if (!g) { noGold.push(a.fixture); continue; }
+    rows.push({ slug, buckets: deriveBuckets(g) });
+  }
+  return { rows, noGold };
+}
+
 function reportCoverage(articles) {
-  console.log('\n--- coverage ---');
-  const goldDir = P.GOLD;
-  // per-axis value tallies
-  for (const axis of BUCKET_KEYS) {
+  console.log('\n--- coverage (axes derived from gold) ---');
+  const { rows, noGold } = derivedFor(articles);
+
+  for (const axis of AXES) {
     const counts = {};
-    let empty = 0;
-    for (const a of articles) {
-      const v = a.buckets?.[axis];
-      if (!v) empty += 1;
+    let unknown = 0;
+    for (const r of rows) {
+      const v = r.buckets[axis];
+      if (!v) unknown += 1;
       else counts[v] = (counts[v] || 0) + 1;
     }
     const seen = Object.entries(counts).map(([k, n]) => `${k}:${n}`).join('  ') || '(none)';
-    const missing = BUCKETS[axis].filter((v) => !counts[v]);
-    console.log(`${axis.padEnd(12)} ${seen}${empty ? `   [empty:${empty}]` : ''}`);
-    if (missing.length) console.log(`${' '.repeat(12)} uncovered: ${missing.join(', ')}`);
+    const missing = AXIS_VALUES[axis].filter((v) => !counts[v]);
+    console.log(`${axis.padEnd(21)} ${seen}${unknown ? `   [underivable:${unknown}]` : ''}`);
+    if (missing.length) console.log(`${' '.repeat(21)} uncovered: ${missing.join(', ')}`);
   }
 
-  // articles missing a gold file
-  const noGold = articles.filter((a) => !fs.existsSync(path.join(goldDir, `${a.gold || a.fixture}.json`)));
-  if (noGold.length) console.log(`\nno gold file: ${noGold.map((a) => a.fixture).join(', ')}`);
-  // articles with any empty bucket
-  const unfilled = articles.filter((a) => BUCKET_KEYS.some((k) => !a.buckets?.[k]));
-  if (unfilled.length) console.log(`buckets unfilled: ${unfilled.map((a) => a.fixture).join(', ')}`);
-  if (!noGold.length && !unfilled.length) console.log('\nall articles have gold + full buckets ✓');
+  if (noGold.length) console.log(`\nno gold file: ${noGold.join(', ')}`);
+
+  // Axis independence. Small corpora give unstable / undefined V — say so rather
+  // than printing a number nobody should act on.
+  console.log('\n--- axis correlation (Cramer\'s V, gate <= 0.30) ---');
+  const corr = axisCorrelations(rows.map((r) => r.buckets));
+  let breached = 0;
+  let computed = 0;
+  for (const [pair, { v, n }] of Object.entries(corr)) {
+    if (v === null) { console.log(`${pair.padEnd(46)} —      (n=${n}, needs 2+ levels on both axes)`); continue; }
+    computed += 1;
+    const bad = v > V_GATE;
+    if (bad) breached += 1;
+    console.log(`${pair.padEnd(46)} ${v.toFixed(2)}${bad ? '  ✗ CONFOUNDED' : '   ok'}   (n=${n})`);
+  }
+  if (breached) console.log(`\n✗ ${breached} axis pair(s) over the ${V_GATE} gate — failures attributed to either axis are contestable.`);
+  else if (!computed) console.log('\n(no pair had enough spread to compute — corpus too small/uniform to judge independence yet)');
+
+  if (!noGold.length && computed && !breached) console.log('\nall articles have gold; no axis pair over the gate ✓');
+  return { rows, noGold, corr, breached };
 }
 
 if (require.main === module) build({ check: process.argv.includes('--check'), scaffold: process.argv.includes('--scaffold-gold') });
 
-module.exports = { build, reportCoverage, goldSkeleton, scaffoldGold };
+module.exports = { build, reportCoverage, goldSkeleton, scaffoldGold, derivedFor, V_GATE };

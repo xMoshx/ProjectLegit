@@ -1,6 +1,6 @@
 {
-  "_comment": "The run spec. Run `node run.js --corpus corpus.json`. Top-level defaults apply unless an article overrides langs/runs. Grow `articles` to the stratified ~120 (content type x source tier x language x author type) per methodology Part 1; these two are the pilot seed.",
-  "model": "gemini-3.5-flash",
+  "_comment": "The run spec. Run `node generator/run.js --corpus corpus/corpus.json`. Top-level defaults apply unless an article overrides langs/runs. Bucket tags are NOT stored here any more — lib/buckets.js derives the stratification axes from each article's gold file. Which URLs to collect is still a human judgment; see docs/benchmark-axes.md for the target grid.",
+  "model": "gemini-2.5-flash",
   "runsPerArticle": 3,
   "langs": [
     "en"
@@ -14,23 +14,11 @@
   "articles": [
     {
       "fixture": "bbc-com-news-articles-c5yzm8m4peeo",
-      "gold": "bbc-com-news-articles-c5yzm8m4peeo",
-      "buckets": {
-        "contentType": "hard-news",
-        "sourceTier": "public-broadcaster",
-        "lang": "en",
-        "authorType": "journalist"
-      }
+      "gold": "bbc-com-news-articles-c5yzm8m4peeo"
     },
     {
       "fixture": "en-wikipedia-org-wiki-journalism",
-      "gold": "en-wikipedia-org-wiki-journalism",
-      "buckets": {
-        "contentType": "reference",
-        "sourceTier": "mainstream",
-        "lang": "en",
-        "authorType": "anonymous"
-      }
+      "gold": "en-wikipedia-org-wiki-journalism"
     }
   ]
 }

@@ -19,6 +19,7 @@ const { makeThrottle } = require('./generator/gemini');
 const { validateGold } = require('./gold/validate-gold');
 const { goldSkeleton } = require('./corpus/build-corpus');
 const { computeAll } = require('./eval/metrics');
+const { deriveBuckets, cramersV, axisCorrelations } = require('./lib/buckets');
 const P = require('./lib/paths');
 
 const PARENT_SOURCE_MARKER = 'PARENT_SOURCE_EXPLANATION_XYZ';
@@ -97,65 +98,115 @@ async function testGroundingModes() {
   console.log('✓ (4) grounding record→snapshot round-trip + miss throws');
 }
 
+const GOOD_LABELS = { source: 'CREDIBLE', author: 'JOURNALIST', consensus: 'CORROBORATED', headline: 'ACCURATE', bias: 'BALANCED', style: 'PROFESSIONAL' };
+
+const goodGold = () => ({
+  slug: 's', url: 'u', labelDate: new Date().toISOString().slice(0, 10),
+  veracity: 'verified-true',
+  evidenceCount: 4,
+  sourceRegistry: { provider: 'mbfc', tier: 'high', rating: 'High Credibility', url: 'https://example.org/x' },
+  overallTrust: 80, goldTier: 'green',
+  gold: { ...GOOD_LABELS },
+});
+
 function testValidateGold() {
-  const good = {
-    slug: 's', url: 'u', labelDate: new Date().toISOString().slice(0, 10),
-    buckets: { contentType: 'hard-news', sourceTier: 'wire', lang: 'en', authorType: 'journalist' },
-    overallTrust: 80, goldTier: 'green',
-    annotators: {
-      a: { source: 'CREDIBLE', author: 'JOURNALIST', consensus: 'CORROBORATED', headline: 'ACCURATE', bias: 'BALANCED', style: 'PROFESSIONAL' },
-      b: { source: 'CREDIBLE', author: 'JOURNALIST', consensus: 'CORROBORATED', headline: 'ACCURATE', bias: 'SLIGHT_BIAS', style: 'PROFESSIONAL' },
-    },
-    gold: { source: 'CREDIBLE', author: 'JOURNALIST', consensus: 'CORROBORATED', headline: 'ACCURATE', bias: 'BALANCED', style: 'PROFESSIONAL' },
-  };
+  const good = goodGold();
   assert.strictEqual(validateGold(good).errors.length, 0, '(5) good gold should pass');
 
-  // Single-annotator gold: no annotators field → valid, warns only.
-  const solo = JSON.parse(JSON.stringify(good));
-  delete solo.annotators;
-  const soloRes = validateGold(solo);
-  assert.strictEqual(soloRes.errors.length, 0, '(5) gold without annotators should pass');
-  assert(soloRes.warnings.some((w) => /annotator/i.test(w)), '(5) missing annotators should warn');
+  // Axis inputs are required — a gold with no veracity/evidenceCount can't be bucketed.
+  for (const field of ['veracity', 'evidenceCount']) {
+    const missing = goodGold();
+    delete missing[field];
+    assert(validateGold(missing).errors.some((e) => e.includes(field)), `(5) missing ${field} must fail`);
+  }
+  const badVeracity = goodGold();
+  badVeracity.veracity = 'sort-of-true';
+  assert(validateGold(badVeracity).errors.length > 0, '(5) off-enum veracity must fail');
 
-  // Partial annotators (a only) → still an error.
-  const partial = JSON.parse(JSON.stringify(good));
-  delete partial.annotators.b;
-  assert(validateGold(partial).errors.length > 0, '(5) incomplete annotators must fail');
+  // No sourceRegistry is legitimate (derives to `unrated`) but must warn.
+  const unrated = goodGold();
+  delete unrated.sourceRegistry;
+  const unratedRes = validateGold(unrated);
+  assert.strictEqual(unratedRes.errors.length, 0, '(5) gold without sourceRegistry should pass');
+  assert(unratedRes.warnings.some((w) => /unrated/i.test(w)), '(5) missing sourceRegistry should warn');
 
-  const bad = JSON.parse(JSON.stringify(good));
+  // Legacy dual-annotator block is ignored, and says so.
+  const legacy = goodGold();
+  legacy.annotators = { a: { ...GOOD_LABELS }, b: { ...GOOD_LABELS } };
+  const legacyRes = validateGold(legacy);
+  assert.strictEqual(legacyRes.errors.length, 0, '(5) legacy annotators must not error');
+  assert(legacyRes.warnings.some((w) => /ignored/i.test(w)), '(5) legacy annotators should warn as ignored');
+
+  // retest is optional, but must be enum-valid when present.
+  const badRetest = goodGold();
+  badRetest.retest = { ...GOOD_LABELS, bias: 'NOT_A_RATING' };
+  assert(validateGold(badRetest).errors.length > 0, '(5) off-enum retest label must fail');
+
+  const bad = goodGold();
   delete bad.labelDate;
   bad.gold.bias = 'NOT_A_RATING';
   assert(validateGold(bad).errors.length >= 2, '(5) broken gold should flag missing date + bad enum');
-  console.log('✓ (5) validate-gold accepts good, rejects broken');
+  console.log('✓ (5) validate-gold: axis inputs required, registry optional, retest checked');
 }
 
 function testGoldSkeleton() {
-  const article = {
-    fixture: 'x', gold: 'x',
-    buckets: { contentType: 'hard-news', sourceTier: 'wire', lang: 'en', authorType: 'journalist' },
-  };
-  const skel = goldSkeleton(article, { url: 'https://example.com/x' });
+  const skel = goldSkeleton({ fixture: 'x', gold: 'x' }, { url: 'https://example.com/x' });
   assert.strictEqual(skel.slug, 'x', '(8) skeleton slug');
   assert.strictEqual(skel.url, 'https://example.com/x', '(8) skeleton url from fixture');
-  assert.deepStrictEqual(skel.buckets, article.buckets, '(8) skeleton copies buckets');
+  assert(!('buckets' in skel), '(8) skeleton must not carry stored buckets any more');
   // Empty skeleton MUST fail validation — an unfilled gold can't sneak into metrics.
   assert(validateGold(skel).errors.length > 0, '(8) empty skeleton must fail validation');
   // Fill the judgment fields → same skeleton now passes.
   skel.labelDate = new Date().toISOString().slice(0, 10);
+  skel.veracity = 'verified-true';
+  skel.evidenceCount = 3;
+  skel.sourceRegistry = { provider: 'mbfc', tier: 'high', rating: 'High', url: 'https://e/x' };
   skel.overallTrust = 80; skel.goldTier = 'green';
-  const full = { source: 'CREDIBLE', author: 'JOURNALIST', consensus: 'CORROBORATED', headline: 'ACCURATE', bias: 'BALANCED', style: 'PROFESSIONAL' };
-  skel.annotators = { a: { ...full }, b: { ...full } };
-  skel.gold = { ...full };
+  skel.gold = { ...GOOD_LABELS };
   assert.strictEqual(validateGold(skel).errors.length, 0, '(8) filled skeleton must pass validation');
-  console.log('✓ (8) gold skeleton: pre-fills known fields, fails empty, passes filled');
+  console.log('✓ (8) gold skeleton: no stored buckets, fails empty, passes filled');
+}
+
+// Buckets are derived from gold, so they can never disagree with the labels.
+function testDerivedBuckets() {
+  const g = goodGold();
+  assert.deepStrictEqual(deriveBuckets(g), {
+    veracity: 'verified-true', sourceReputation: 'high',
+    rhetoricalLoad: 'neutral', evidenceAvailability: 'dense',
+  }, '(9) derivation from a clean gold');
+
+  const loaded = goodGold();
+  loaded.gold.bias = 'STRONG_BIAS';
+  loaded.gold.style = 'SENSATIONALIST';
+  loaded.evidenceCount = 1;
+  delete loaded.sourceRegistry;
+  const d = deriveBuckets(loaded);
+  assert.strictEqual(d.rhetoricalLoad, 'heavy', `(9) heavy rhetoric, got ${d.rhetoricalLoad}`);
+  assert.strictEqual(d.evidenceAvailability, 'sparse', `(9) sparse evidence, got ${d.evidenceAvailability}`);
+  assert.strictEqual(d.sourceReputation, 'unrated', '(9) no registry -> unrated');
+
+  // Cramer's V: the gate that says the axes are attributable.
+  const coupled = [['a', 'x'], ['a', 'x'], ['b', 'y'], ['b', 'y']];
+  const independent = [['a', 'x'], ['a', 'y'], ['b', 'x'], ['b', 'y']];
+  assert.strictEqual(cramersV(coupled), 1, '(9) fully coupled -> V=1');
+  assert(cramersV(independent) < 1e-9, '(9) independent -> V~0');
+  assert.strictEqual(cramersV([['a', 'x'], ['a', 'y']]), null, '(9) single level -> undefined');
+
+  const corr = axisCorrelations([deriveBuckets(g), deriveBuckets(loaded)]);
+  assert('veracity x sourceReputation' in corr, '(9) every axis pair reported');
+  assert.strictEqual(Object.keys(corr).length, 6, '(9) 4 axes -> 6 pairs');
+  console.log('✓ (9) derived buckets + Cramer\'s V axis-independence gate');
 }
 
 function testMetrics(ext) {
   const goldMap = {
     S1: {
       slug: 'S1', overallTrust: 90, goldTier: 'green',
-      buckets: { contentType: 'hard-news', sourceTier: 'public-broadcaster', lang: 'en', authorType: 'journalist' },
+      veracity: 'verified-true', evidenceCount: 6,
+      sourceRegistry: { provider: 'mbfc', tier: 'high', rating: 'High Credibility' },
       gold: { source: 'HIGHLY_CREDIBLE', author: 'JOURNALIST', consensus: 'CORROBORATED', headline: 'ACCURATE', bias: 'BALANCED', style: 'PROFESSIONAL' },
+      // Same labeler's second pass — the ceiling. Differs on bias only.
+      retest: { source: 'HIGHLY_CREDIBLE', author: 'JOURNALIST', consensus: 'CORROBORATED', headline: 'ACCURATE', bias: 'SLIGHT_BIAS', style: 'PROFESSIONAL' },
     },
   };
   const agentsWith = (biasRating) => [
@@ -179,9 +230,28 @@ function testMetrics(ext) {
   assert.strictEqual(m.robustness.meanFinalScoreStd, 2.5, `(6) score std ${m.robustness.meanFinalScoreStd}`);
   assert(Math.abs(m.product.brier - 0.00125) < 1e-9, `(6) brier ${m.product.brier}`); // (0 + 0.0025)/2
   assert.strictEqual(m.product.greenButRed, 0, '(6) greenButRed');
-  assert.strictEqual(m.product.buckets['sourceTier:public-broadcaster'].pass, 2, '(6) bucket pass');
+  // Bucket key comes from the DERIVED axis (sourceRegistry.tier high), not a tag.
+  assert.strictEqual(m.product.buckets['sourceReputation:high'].pass, 2, '(6) derived bucket pass');
   assert.strictEqual(m.product.tierConfusion.green.green, 2, '(6) tier confusion');
-  console.log('✓ (6) metrics: MAE, off-by-1, quad-κ, flip, stddev, Brier, bucket, tier-confusion');
+  // Retest ceiling: bias gold BALANCED vs retest SLIGHT_BIAS — one off-by-one pair,
+  // so observed disagreement == expected -> κ 0 (the labeler was not self-consistent
+  // on the one bias call we have). source agreed exactly, leaving no expected
+  // disagreement to correct against -> κ undefined.
+  assert.strictEqual(m.perAgent.bias.retestKappa, 0, `(6) retest κ ${m.perAgent.bias.retestKappa}`);
+  assert.strictEqual(m.perAgent.source.retestKappa, null, '(6) retest κ undefined when labeler agreed exactly');
+  console.log('✓ (6) metrics: MAE, off-by-1, quad-κ, flip, stddev, Brier, derived bucket, tier-confusion');
+
+  // green-but-verified-false: the sharper false-trust number.
+  const falseGold = { F1: { slug: 'F1', veracity: 'verified-false', goldTier: 'red', overallTrust: 10, gold: { source: 'UNRELIABLE' } } };
+  const falseRecs = [
+    { slug: 'F1', run: 1, lang: 'en', tier: 'green', finalScore: 85, agents: [{ id: 'source-verify', rating: 'CREDIBLE' }] },
+    { slug: 'F1', run: 2, lang: 'en', tier: 'red', finalScore: 20, agents: [{ id: 'source-verify', rating: 'UNRELIABLE' }] },
+  ];
+  const mf = computeAll(falseRecs, falseGold, { score: ext.ratingToScore });
+  assert.strictEqual(mf.product.falseN, 2, `(6c) falseN ${mf.product.falseN}`);
+  assert.strictEqual(mf.product.greenButFalse, 1, `(6c) greenButFalse ${mf.product.greenButFalse}`);
+  assert.strictEqual(mf.product.buckets['veracity:verified-false'].pass, 1, '(6c) verified-false bucket pass-rate');
+  console.log('✓ (6c) green-but-verified-false + veracity bucket pass-rate');
 
   // Unfilled gold stub ("" rating) must NOT count — no n/offScale inflation.
   const stubGold = { S1: goldMap.S1, S2: { slug: 'S2', gold: { source: '' } } };
@@ -190,6 +260,37 @@ function testMetrics(ext) {
   assert.strictEqual(m2.perAgent.source.n, 2, `(6) empty-stub gold must not inflate n, got ${m2.perAgent.source.n}`);
   assert.strictEqual(m2.perAgent.source.offScale, 0, `(6) empty-stub gold must not count as off-scale, got ${m2.perAgent.source.offScale}`);
   console.log('✓ (6b) unfilled gold stub skipped, not counted');
+}
+
+// Shortcut probe: the same critical-class metric split by source reputation.
+// Built so consensus catches the false claim from the low-reputation outlet and
+// misses the identical one from the high-reputation outlet — the exact signature
+// of an agent keying on the domain instead of the claim.
+function testShortcutProbe(ext) {
+  const goldFor = (slug, tier) => ({
+    slug, veracity: 'verified-false', goldTier: 'red', overallTrust: 10,
+    evidenceCount: 3,
+    sourceRegistry: tier ? { provider: 'mbfc', tier, rating: 'x' } : undefined,
+    gold: { source: 'CREDIBLE', author: 'JOURNALIST', consensus: 'CONTRADICTS_CONSENSUS', headline: 'ACCURATE', bias: 'BALANCED', style: 'PROFESSIONAL' },
+  });
+  const goldMap = { HI: goldFor('HI', 'high'), LO: goldFor('LO', 'low') };
+  const rec = (slug, consensusRating) => ({
+    slug, run: 1, lang: 'en', tier: 'orange', finalScore: 45,
+    agents: [{ id: 'consensus-verify', rating: consensusRating }],
+  });
+  // Missed on the reputable outlet, caught on the disreputable one.
+  const m = computeAll([rec('HI', 'CORROBORATED'), rec('LO', 'CONTRADICTS_CONSENSUS')], goldMap, { score: ext.ratingToScore });
+  const split = m.perAgent.consensus.criticalBySource;
+
+  assert(split, '(10) consensus should have a source-reputation split');
+  assert.strictEqual(split.high.value, 0, `(10) recall on high-reputation ${split.high.value}`);
+  assert.strictEqual(split.low.value, 1, `(10) recall on low-reputation ${split.low.value}`);
+  assert.strictEqual(split.high.n, 1, '(10) high denominator');
+  // Levels with no articles are omitted, not reported as zero.
+  assert(!('mixed' in split), '(10) empty level must be omitted');
+  // Agents with no CRITICAL config get no split.
+  assert.strictEqual(m.perAgent.style.criticalBySource, null, '(10) no split for style');
+  console.log('✓ (10) shortcut probe: critical class split by source reputation');
 }
 
 function testOffScaleDetection(ext) {
@@ -219,7 +320,9 @@ async function main() {
   await testGroundingModes();
   testValidateGold();
   testGoldSkeleton();
+  testDerivedBuckets();
   testMetrics(ext);
+  testShortcutProbe(ext);
   testOffScaleDetection(ext);
   console.log('\n✓ selftest passed');
 }
