@@ -6,7 +6,9 @@ ISOC sent QA results on an older Legit version (the v2.1.4 update report). They 
 
 The need: Legit is a multi-agent LLM credibility scorer with **no test suite, no gold set, no eval harness**. Every release so far recalibrates prompts by feel (v2.1.5 commit msg: "recalibrate ... prompts"). To grow with ISOC we need a defensible, repeatable benchmark that measures both *whether each agent classifies correctly* and *whether the final 0-100 product score behaves correctly* — and that we agree is objectively meaningful.
 
-Scope of this document: methodology only (no harness code, no labeling done yet). Labeling capacity today = 2 devs (Daniel + Moshe), designed to scale to outside annotators later. Both per-agent diagnostics and end-to-end product validation are in scope, equally.
+Scope of this document: methodology only (no harness code, no labeling done yet). Both per-agent diagnostics and end-to-end product validation are in scope, equally.
+
+> ⚠️ **Two things in this document have since changed.** (1) Labeling is done by **one professional labeler provided by ISOC**, not 2 devs with adjudication — so the IAA ceiling is replaced by a self-consistency retest (Part 1). (2) The four stratification axes in Part 1 are **superseded** by [`benchmark-axes.md`](benchmark-axes.md). The metric design — ordinal MAE, weighted κ, critical-class, calibration, stability — is unchanged and still current.
 
 ---
 
@@ -39,13 +41,14 @@ Scope of this document: methodology only (no harness code, no labeling done yet)
 Without a labeled corpus every metric is vapor. This is the load-bearing piece.
 
 - **Size:** target ~120 articles. ISOC's 37 is too thin for per-class metrics on 5-7 classes (some classes get <5 examples). 120 is the floor where per-class precision/recall stops being noise; still small enough for 2 devs to label.
-- **Stratification (the point, not raw count):** sample deliberately across the axes that break the agents:
+- **Stratification (the point, not raw count):** sample deliberately across the axes that break the agents. **⚠️ The four axes below are superseded — see [`benchmark-axes.md`](benchmark-axes.md).** They are correlated proxies for a single latent variable (trustworthiness), which makes failures unattributable and cannot detect domain-recognition shortcuts. Retained here as the original rationale:
   - *Content type*: hard news, opinion/op-ed, satire, tabloid/gossip, clickbait aggregator, press release/PR, state-media propaganda.
   - *Source tier*: wire/public broadcaster, mainstream, hyperpartisan, fringe/conspiracy, unknown-small.
   - *Language*: EN and HE, with a deliberate slice of **legit Hebrew-language sources absent from MBFC/AllSides** (directly tests the v2.1.4 CEILING-rule regression risk ISOC flagged).
   - *Author type*: bylined expert, staff journalist, anonymous, pseudonymous, known-bad actor.
-- **Labeling protocol:** each article labeled independently by 2 annotators on every agent's enum, then disagreements adjudicated to a single gold label. Record *both* raw labels (for IAA) and the adjudicated gold.
-- **IAA is a deliverable, not overhead:** report human-human quadratic-weighted κ per agent. This is the **ceiling** — Legit cannot be expected to beat the agreement two humans achieve. For `bias` especially, expect a low ceiling and say so up front.
+- **Labeling protocol — ⚠️ superseded.** This document assumed 2 dev annotators with adjudication. **ISOC now provides one professional labeler**, so there is no inter-annotator agreement and no adjudication step. The `annotators` block is gone from the gold schema. Retained below as the original reasoning:
+  - ~~each article labeled independently by 2 annotators on every agent's enum, then disagreements adjudicated to a single gold label~~
+- **A ceiling is still a deliverable** — it just isn't IAA. The single labeler re-labels a ~20-article subset after 2+ weeks, shuffled (`retest` in the gold file), and we report **quadratic-weighted retest κ** per agent as the ceiling. It measures the labeler's *precision*, not accuracy: a consistently biased labeler scores 1.0. The externally anchored gold fields (`sourceRegistry` lookups, published fact-checks behind `veracity`) are the guard against that. For `bias` especially, expect a low ceiling and say so up front.
 - **Reproducibility — two modes, by design (see Part 5, decision D4):** freeze each article's extracted text as a fixture so Readability is stable. `google_search` grounding still drifts — and that drift is *correct* for the product (a clean author today can surface as deceptive tomorrow; the extension's whole value is "right now"). So we don't fight it; we split it: **live mode** for measuring real-world behaviour, **snapshot mode** (pinned search results) for regression A/B where the prompt/map must be the only variable. Every run is timestamped.
 - **Gold labels expire.** Same drift means a source's true reliability can change, so a gold label is only valid as of its date. Gold set carries a label-date and gets re-validated on a cadence; stale labels are excluded from a run rather than trusted blindly.
 
@@ -61,7 +64,7 @@ For every agent: **aim** (what good means), **primary metric**, **critical-class
 | `consensus-format` / `consensus-verify` | **Medium-high** — Snopes/PolitiFact give checkable claims | **Recall on CONTRADICTS_CONSENSUS** (= 1 − FNR; ISOC's 70% FNR was the worst finding) | **FPR**: % of true claims wrongly marked CONTRADICTS (over-refutation after the v2.1.4 MANDATORY REFUTATION SEARCH change). |
 | `author` | **Medium** — identity/footprint partly checkable | Confusion matrix over 6 classes | **SUSPICIOUS precision must be ~100%** (legal/defamation risk). Recall is secondary. |
 | `headline` | **Low-medium** — headline-vs-body is judgmental | Ordinal MAE + directional confusion (TOO_HARSH vs TOO_LENIENT) | Net directional bias (signed mean error) — catches the v2.1.4 over-correction toward ACCURATE. |
-| `bias` | **Low** — contested even among humans | Quad-weighted κ vs gold + **report human IAA ceiling prominently** | Polar-flip rate (BALANCED↔STRONG_BIAS): the only bias error everyone agrees is wrong. |
+| `bias` | **Low** — contested even among humans | Quad-weighted κ vs gold + **report the retest ceiling prominently** | Polar-flip rate (BALANCED↔STRONG_BIAS): the only bias error everyone agrees is wrong. |
 | `style` | **Low, but low stakes** (weight 0.10) | Off-by-one (adjacent) accuracy | none — tolerate ±1 category. |
 
 **Metric definitions (with the objective-good/bad judgment):**
@@ -124,7 +127,7 @@ The scoring logic is test-ready. The **system** is not — it's a browser extens
 ## What we explicitly disagree with ISOC about
 
 1. Exact-match accuracy on ordinal scales is the wrong primary metric — we use ordinal MAE + weighted κ.
-2. κ against a single judge is consistency, not correctness — without a human-IAA ceiling it's uninterpretable; we report the ceiling.
+2. κ against a single judge is consistency, not correctness — without a ceiling it's uninterpretable; we report one (labeler retest κ, with its precision-not-accuracy caveat stated).
 3. A single per-agent accuracy number hides cost-asymmetric errors — we use critical-class precision/recall (SUSPICIOUS precision, CONTRADICTS recall, false-trust rate).
 4. The product (0-100 score + tier) was never validated — we add calibration + bucket pass-rates + tier confusion.
 5. A nondeterministic system needs a stability metric — we add run-to-run and EN/HE agreement.
@@ -134,6 +137,6 @@ The scoring logic is test-ready. The **system** is not — it's a browser extens
 ## Open items before harness/labeling investment
 
 - ~~Audit `ratingToScore`~~ — **done** (Part 5, *Score-map fix*). Rebuilt monotonic + even-spaced; pending empirical validation, not re-audit.
-- **Dry-run the labeling schema:** label ~5–15 articles against the per-agent enums to confirm the categories are human-usable, IAA capture works, and to get a first directional old-map-vs-new-map signal (D8) before committing to 120. Needs none of the harness — do this first.
+- **Dry-run the labeling schema:** label ~5–15 articles against the per-agent enums to confirm the categories are usable by the ISOC labeler, that the axis inputs (`veracity`, `evidenceCount`, `sourceRegistry`) are fillable, and to get a first directional old-map-vs-new-map signal (D8) before committing to the full corpus. Needs none of the harness — do this first.
 - **ISOC round-trip:** confirm the metric set and the five disagreements land before any harness or labeling investment.
 - **Build order, once green-lit:** D1 runner → D3 cache-off + D4 grounding modes → D9 capture → D5 structured output → first full run. D2 (budget) and D7 (HE whitelist) run in parallel from the start.

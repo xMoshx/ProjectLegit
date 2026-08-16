@@ -90,27 +90,27 @@ can't infer from a URL). One file defines the whole run, not CLI flags:
 {
   "runsPerArticle": 3, "langs": ["en"], "grounding": "live",
   "articles": [
-    { "fixture": "bbc-...", "gold": "bbc-...",
-      "buckets": { "contentType": "hard-news", "sourceTier": "public-broadcaster",
-                   "lang": "en", "authorType": "journalist" } }
+    { "fixture": "bbc-...", "gold": "bbc-..." }
   ]
 }
 ```
 
-**Buckets = the 4 stratification axes** (methodology Part 1), each a value from the
-canonical enum in `lib/buckets.js` (validated in gold files, aligned with the
-product pass-rate bands in `metrics.js`):
+**Buckets are derived, not stored.** `corpus.json` carries no bucket tags —
+`deriveBuckets(gold)` in `lib/buckets.js` computes all four stratification axes
+from each article's gold file:
 
-| Axis | Values |
-|---|---|
-| `contentType` | hard-news, opinion, satire, tabloid-gossip, clickbait-aggregator, press-release, state-propaganda, reference |
-| `sourceTier` | wire, public-broadcaster, mainstream, hyperpartisan, fringe-conspiracy, unknown-small |
-| `lang` | en, he |
-| `authorType` | expert, journalist, citizen-journalist, anonymous, pseudonymous, suspicious |
+| Axis | Derived from | Values |
+|---|---|---|
+| `veracity` | `gold.veracity` (labeled) | verified-true, verified-false, mixed, no-factual-claim |
+| `sourceReputation` | `gold.sourceRegistry.tier`, absent → unrated | high, mixed, low, unrated |
+| `rhetoricalLoad` | ranks of `gold.bias` + `gold.style` | neutral, moderate, heavy |
+| `evidenceAvailability` | `gold.evidenceCount` (0 / 1–2 / ≥3) | absent, sparse, dense |
 
-They do two jobs: **stratify** the corpus (sample across the axes that break the
-agents, not random 120) and drive the **product bucket pass-rate** (satire→red,
-public-broadcaster→green, …).
+They do two jobs: **slice** the results (post-hoc, derived) and drive the
+**product bucket pass-rate**. What they cannot do is **sample** — picking which
+URLs to collect stays a human checklist, since the gold doesn't exist yet. See
+[`benchmark-axes.md`](benchmark-axes.md) for why these four and the evidence
+behind them.
 
 ### Stage 2 — Generate (`generator/run.js` + `gemini.js`)
 
@@ -159,27 +159,35 @@ walk away:
 
 That file is the handoff.
 
-### Stage 3 — Ground truth (`gold/`) ← humans, not code
+### Stage 3 — Ground truth (`gold/`) ← one professional labeler, not code
 
-For each article, two annotators independently label every agent's enum (e.g.
-bias: `BALANCED`), disagreements adjudicated to one **gold** label. Also an
-overall-trust 0–100 + gold tier. Both raw labels are kept — that's the **IAA
-ceiling** (Legit can't beat what two humans agree on).
+ISOC provides a single professional labeler, so there is no inter-annotator
+agreement and no adjudication. Per article: every agent's enum (e.g. bias:
+`BALANCED`), an overall-trust 0–100 + gold tier, and the three axis inputs
+(`veracity`, `evidenceCount`, `sourceRegistry`).
+
+**The ceiling** comes from a **retest** instead: the same labeler re-labels a
+~20-article subset after 2+ weeks, shuffled, into a `retest` block. `metrics.js`
+reports retest κ per agent. Read it as a *precision* ceiling — a consistently
+biased labeler scores 1.0. It bounds task ambiguity, not labeler bias; the
+externally anchored fields (`sourceRegistry`, the fact-checks behind `veracity`)
+are the guard against that.
 
 You don't hand-write the file boilerplate. `build-corpus.js --scaffold-gold`
-writes a **stub gold file** for every article missing one: machine pre-fills the
-fields it knows (`slug`, `url` from the fixture, `buckets` from the corpus entry)
-and stubs the judgment fields empty. Empty stubs deliberately **fail**
-`validate-gold` — so a half-filled gold can't silently poison a metric. Never
-overwrites an existing gold file. Humans then fill only the enums + trust/tier.
+writes a **stub gold file** for every article missing one: machine pre-fills what
+it knows (`slug`, `url` from the fixture) and stubs the judgment fields empty.
+Empty stubs deliberately **fail** `validate-gold` — so a half-filled gold can't
+silently poison a metric. Never overwrites an existing gold file.
 
-`gold/validate-gold.js` enforces the schema: enum membership, both raw labels +
-gold present, valid non-stale `labelDate`, bucket tags. Stops a malformed label
-from silently poisoning a metric.
+`gold/validate-gold.js` enforces the schema: enum membership, axis inputs present
+and in-enum, valid non-stale `labelDate`. A missing `sourceRegistry` warns rather
+than fails (it derives to `unrated` — the CEILING-rule case).
 
 ```json
-{ "slug", "labelDate", "buckets", "overallTrust": 88, "goldTier": "green",
-  "annotators": { "a": {}, "b": {} }, "gold": { "bias": "BALANCED" } }
+{ "slug", "labelDate", "veracity": "verified-true", "evidenceCount": 5,
+  "sourceRegistry": { "provider": "mbfc", "tier": "high", "rating": "…", "url": "…" },
+  "overallTrust": 88, "goldTier": "green",
+  "gold": { "bias": "BALANCED" }, "retest": { "bias": "SLIGHT_BIAS" } }
 ```
 
 ### Stage 4 — Measure (`eval/metrics.js`) ← we run this, offline
@@ -192,14 +200,15 @@ computed twice).
   accuracy + class prevalence, per the κ-paradox rule), off-by-one accuracy,
   confusion matrix, signed error, parse-fail rate, and a **critical class** per
   agent (source false-trust rate, author SUSPICIOUS precision, consensus
-  CONTRADICTS recall, bias polar-flip). Human-IAA κ reported beside each as the
+  CONTRADICTS recall, bias polar-flip). Retest κ reported beside each as the
   ceiling. **Off-scale detection** — the two ratings that sit outside the ordinal
   ladder (`SATIRE`, `ENTERTAINMENT_GOSSIP` on source/consensus) get their own
   precision + recall, since ordinal MAE/κ can't say whether the agent *recognized*
   the genre. Read straight from the confusion matrix.
 - **Part 3 — product:** calibration + Brier vs overall-trust gold, known-bucket
-  pass-rate (satire→red, public-broadcaster→green…), 4×4 tier-confusion with
-  **green-but-actually-red** as its own number.
+  pass-rate over derived buckets, 4×4 tier-confusion with **green-but-actually-red**
+  and **green-but-verified-false** each as their own number. The second is the
+  sharper of the two: it compares against an external fact-check, not a judged tier.
 - **Part 4 — robustness:** run-to-run flip rate + final-score stddev (from the ×3
   runs), EN/HE score delta + rating-flip.
 
@@ -213,7 +222,7 @@ computed twice).
 
 ### Stage 5 — Report (`eval/report.js`)
 
-`computeAll()` → `out/report.md` + `report.csv`: per-agent table with the IAA
+`computeAll()` → `out/report.md` + `report.csv`: per-agent table with the retest
 ceiling beside each, tier-confusion, calibration, bucket pass-rates, stability
 figures. The tables mirror ISOC's own report format.
 
@@ -304,7 +313,7 @@ node gold/validate-gold.js --strict   # stale labelDate (>180d) becomes an error
 ```
 
 **Expect:** a `✓`/`✗` per file. Exit 1 if any fails, with the exact bad field
-(`overallTrust must be int 0-100`, `annotator.a.source = "" not in enum […]`). An
+(`overallTrust must be int 0-100`, `gold.source = "" not in enum […]`). An
 unfilled scaffold stub fails here by design — fill it or it's skipped downstream.
 
 ### 4. Metrics + report — `eval/metrics.js`, `eval/report.js` (offline, no key)
@@ -359,8 +368,8 @@ below are for a full stratified run; at pilot size, treat them as directional.
 | **signed err** | −100…+100 | ~0 | Direction of the bias. **Positive = agent too trusting** (scores above gold), negative = too harsh. |
 | **exact** | 0–100% | high | Share where predicted rung == gold rung. |
 | **off-by-1** | 0–100% | high | Share within one ladder rung. High off-by-1 with low exact = "close but fuzzy", usually fine. |
-| **quad-κ** | −1…1 | → IAA | Chance-corrected agreement, polar errors punished hardest. **≤0 = no better than guessing**, 0.2–0.4 fair, 0.6+ good. Read it *against the IAA ceiling*, not against 1.0. |
-| **human-IAA κ** | −1…1 | — | The ceiling — how well the two humans agreed. Legit can't beat this; a quad-κ near it means the agent is as good as the task allows. |
+| **quad-κ** | −1…1 | → retest κ | Chance-corrected agreement, polar errors punished hardest. **≤0 = no better than guessing**, 0.2–0.4 fair, 0.6+ good. Read it *against the retest ceiling*, not against 1.0. |
+| **retest κ** | −1…1 | — | The ceiling — how well the labeler agreed with themselves 2+ weeks later. A quad-κ near it means the agent is as good as the task allows. Precision only: a consistently biased labeler scores 1.0. |
 | **parse-fail** | 0–100% | ~0 | Share of responses with no readable `RATING:` token. High = a prompt/format problem, not a judgment problem. |
 | **critical class** | 0–100% | see `aim` | The one costly error per agent (below). |
 
@@ -434,5 +443,5 @@ Tier bands (final score → tier): **green ≥80, yellow ≥60, orange ≥40, re
 ## Related docs
 
 - [`benchmark-methodology.md`](benchmark-methodology.md) — why these metrics (the design rationale).
-- [`benchmark-harness-milestone-2.md`](benchmark-harness-milestone-2.md) — the build plan this pipeline implements.
-- [`../bench/README-ISOC.md`](../bench/README-ISOC.md) — the generator run contract for ISOC.
+- [`benchmark-axes.md`](benchmark-axes.md) — why the corpus is stratified the way it is (evidence + redesign).
+- [`benchmark-test-readiness.md`](benchmark-test-readiness.md) — when a bucket is allowed to produce a number.
