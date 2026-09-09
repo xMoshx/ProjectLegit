@@ -162,6 +162,50 @@ For a deep dive into data flow, the two-phase agent pipeline, and the caching st
 
 ---
 
+## 📊 Benchmark & Evaluation
+
+Legit is a non-deterministic LLM system, so "it looks right" is not a release criterion. The `bench/` harness and the `docs/benchmark-*.md` specs exist to answer one question: **does a prompt or weight change actually make the product better, and can we prove it?**
+
+### Goal
+
+Measure both halves of the system against human-labeled ground truth:
+
+* **Per-agent** — each agent is an *ordinal* classifier (e.g. `BALANCED → SLIGHT_BIAS → MODERATE_BIAS → STRONG_BIAS`), so we report ordinal MAE, quadratic-weighted κ, and directional confusion (too harsh vs. too lenient) instead of exact-match accuracy.
+* **End-to-end** — the user-facing 0–100 score and its green/yellow/orange/red tier, checked for calibration, per-bucket pass rates, and run-to-run stability across repeat runs and both languages.
+
+The corpus is stratified so that failures are attributable, and deliberately includes off-diagonal cases (a credible article on a low-reputation domain, and vice versa) to probe whether the pipeline is reading the article or just recognising the domain.
+
+### Harness layout (`bench/`)
+
+The design splits into two halves joined by a single file, `out/predictions.jsonl` — the expensive LLM half runs once, the cheap analysis half re-runs for free.
+
+| Path | Role |
+| :--- | :--- |
+| `corpus/` | `extract.js` freezes a live URL into a fixture via Readability; `build-corpus.js` assembles the run spec |
+| `gold/` | Human labels, one JSON per article, plus `validate-gold.js` |
+| `generator/` | The LLM half — replays the real `scripts/*.js` agents against fixtures and writes `out/predictions.jsonl` |
+| `eval/` | The offline half — `metrics.js`, `report.js`, `replay.js`, and the score/weight maps |
+| `lib/` | Shared: ordinal ladders, agent weights, stratification buckets, extension loader |
+
+```bash
+cd bench && npm install
+npm run selftest        # sanity-check the harness
+npm run extract -- <url>  # freeze an article into a fixture
+npm run run             # generate predictions (needs a Gemini key)
+npm run metrics         # offline scoring — no API calls
+```
+
+### Documentation
+
+| Doc | Covers |
+| :--- | :--- |
+| [`docs/benchmark-methodology.md`](docs/benchmark-methodology.md) | What we measure and why — metric choices, and what was kept or rejected from the external QA report |
+| [`docs/benchmark-axes.md`](docs/benchmark-axes.md) | How the corpus is stratified, and why the original four axes were redesigned |
+| [`docs/benchmark-pipeline.md`](docs/benchmark-pipeline.md) | How the harness runs end to end — stages, data flow, commands |
+| [`docs/benchmark-test-readiness.md`](docs/benchmark-test-readiness.md) | When a bucket is allowed to produce a number — the acceptance contract for labeling |
+
+---
+
 ## 🤝 Contributing
 
 Contributions are welcome! Here is how to get started:
