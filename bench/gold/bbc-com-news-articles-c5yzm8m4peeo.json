@@ -1,0 +1,19 @@
+{
+  "_comment": "PILOT EXAMPLE — replace with the professional labeler's real labels. `gold` is the label set; `retest` is the same labeler's second pass (2+ weeks later, shuffled) and exists only on a ~20-article subset to give the self-consistency ceiling. Stratification axes are DERIVED from veracity + sourceRegistry + evidenceCount + gold.bias/style — see lib/buckets.js.",
+  "slug": "bbc-com-news-articles-c5yzm8m4peeo",
+  "url": "https://www.bbc.com/news/articles/c5yzm8m4peeo",
+  "labelDate": "2026-07-10",
+  "veracity": "verified-true",
+  "evidenceCount": 5,
+  "sourceRegistry": {
+    "provider": "mbfc",
+    "tier": "high",
+    "rating": "High Credibility / Least Biased",
+    "url": "https://mediabiasfactcheck.com/bbc/",
+    "checkedOn": "2026-07-10"
+  },
+  "overallTrust": 88,
+  "goldTier": "green",
+  "gold": { "source": "HIGHLY_CREDIBLE", "author": "JOURNALIST", "consensus": "CORROBORATED", "headline": "ACCURATE", "bias": "BALANCED", "style": "PROFESSIONAL" },
+  "retest": { "source": "HIGHLY_CREDIBLE", "author": "JOURNALIST", "consensus": "CORROBORATED", "headline": "ACCURATE", "bias": "SLIGHT_BIAS", "style": "PROFESSIONAL" }
+}

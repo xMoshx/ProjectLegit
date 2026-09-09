@@ -1,0 +1,24 @@
+{
+  "_comment": "The run spec. Run `node generator/run.js --corpus corpus/corpus.json`. Top-level defaults apply unless an article overrides langs/runs. Bucket tags are NOT stored here any more — lib/buckets.js derives the stratification axes from each article's gold file. Which URLs to collect is still a human judgment; see docs/benchmark-axes.md for the target grid.",
+  "model": "gemini-2.5-flash",
+  "runsPerArticle": 3,
+  "langs": [
+    "en"
+  ],
+  "grounding": "live",
+  "structured": false,
+  "throttle": {
+    "rate": 30,
+    "windowMs": 60000
+  },
+  "articles": [
+    {
+      "fixture": "bbc-com-news-articles-c5yzm8m4peeo",
+      "gold": "bbc-com-news-articles-c5yzm8m4peeo"
+    },
+    {
+      "fixture": "en-wikipedia-org-wiki-journalism",
+      "gold": "en-wikipedia-org-wiki-journalism"
+    }
+  ]
+}

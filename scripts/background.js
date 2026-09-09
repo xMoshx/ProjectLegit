@@ -288,7 +288,7 @@ async function callGemini(promptText, options = {}) {
  */
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === "CALL_GEMINI") {
-        callGemini(msg.prompt, {useSearch: msg.useSearch, tokensBudget: msg.tokensBudget})
+        callGemini(msg.prompt, {useSearch: msg.useSearch, tokensBudget: msg.tokensBudget, systemInstruction: msg.systemInstruction})
             .then(result => {
                 sendResponse({ result });
             })

@@ -382,27 +382,36 @@ function parseAgentResponse(text) {
  * @returns {number} Integer score from 0 to 100.
  */
 function ratingToScore(rating) {
+    // ponytail: one flat map (ratingToScore gets a bare rating, no agent id).
+    // INVARIANT — each agent's ladder must stay strictly monotonic and roughly
+    // evenly spaced: ordinal MAE / off-by-one metrics in the benchmark assume a
+    // one-category step ≈ constant points. Shared keys (UNVERIFIABLE, SATIRE,
+    // ENTERTAINMENT_GOSSIP) must hold the SAME value across the agents that emit
+    // them. Tiers derive from value: green ≥80, yellow ≥60, orange ≥40, red <40.
+    // Only ratings a live agent actually emits belong here; unknowns fall to -1
+    // → parseAgentResponse() defaults them to 50.
     const scoreMap = {
-        // --- 🟢 GREEN (80-100) ---
-        HIGHLY_CREDIBLE: 100, EXPERT: 95, CORROBORATED: 95, WELL_SOURCED: 95,
-        ACCURATE: 95, JOURNALIST: 90, BALANCED: 90, CURRENT: 90, CREDIBLE: 85,
-        NEUTRAL: 85, PROFESSIONAL: 85, PLAUSIBLE: 85, MOSTLY_ACCURATE: 80, RECENT: 80,
+        // source-verify / source-format (ladder + special low buckets)
+        HIGHLY_CREDIBLE: 100, CREDIBLE: 80, NEUTRAL: 60, QUESTIONABLE: 35, UNRELIABLE: 10,
 
-        // --- 🟡 YELLOW (60-79) ---
-        ADEQUATE: 70, CITIZEN_JOURNALIST: 70, 
-        SLIGHT_BIAS: 70, PARTIALLY_SOURCED: 60, UNIQUE_REPORTING: 60, DATED: 60,
-        SENSATIONAL: 75, SOMEWHAT_MISLEADING:70,
+        // author (ANONYMOUS/UNVERIFIABLE = neutral "can't confirm", not guilt;
+        // SUSPICIOUS gated to documented disinfo history → harsh)
+        EXPERT: 95, JOURNALIST: 85, CITIZEN_JOURNALIST: 65, ANONYMOUS: 50, SUSPICIOUS: 5,
 
-        // --- 🟠 ORANGE (40-59) ---
-        UNVERIFIED: 50, UNVERIFIABLE: 50, UNKNOWN: 50, ERROR: 50,
-        QUESTIONABLE: 40, MODERATE_BIAS: 40, CLICKBAIT: 50,
+        // consensus-verify / consensus-format
+        CORROBORATED: 100, PLAUSIBLE: 80, UNIQUE_REPORTING: 60, CONTRADICTS_CONSENSUS: 0,
 
-        // --- 🔴 RED (0-39) ---
-        SENSATIONALIST: 35, ANONYMOUS: 35,
-        POORLY_SOURCED: 30, POOR_QUALITY: 30, RECYCLED: 30, CONTAINS_ERRORS: 20,
-        STRONG_BIAS: 20, UNSOURCED: 15, UNRELIABLE: 10,
-        MISLEADING: 10, SUSPICIOUS: 10, DECEPTIVE: 5, HIGHLY_MANIPULATIVE: 5,
-        CONTRADICTS_CONSENSUS: 0, ENTERTAINMENT_GOSSIP: 5, SATIRE: 5
+        // headline (ACCURATE → DECEPTIVE)
+        ACCURATE: 100, SENSATIONAL: 75, SOMEWHAT_MISLEADING: 50, CLICKBAIT: 25, DECEPTIVE: 5,
+
+        // bias (BALANCED → STRONG_BIAS)
+        BALANCED: 100, SLIGHT_BIAS: 75, MODERATE_BIAS: 45, STRONG_BIAS: 15,
+
+        // style (PROFESSIONAL → POOR_QUALITY)
+        PROFESSIONAL: 100, ADEQUATE: 70, SENSATIONALIST: 40, POOR_QUALITY: 15,
+
+        // shared across agents (same value wherever emitted)
+        UNVERIFIABLE: 50, ENTERTAINMENT_GOSSIP: 5, SATIRE: 5
     };
 
     // NOTE: use hasOwnProperty, not `|| -1`, so a legitimate score of 0
@@ -1385,6 +1394,7 @@ window.displayPageHeader        = displayPageHeader;
 window.displayOverallScore      = displayOverallScore;
 window.startCalculatingAnimation = startCalculatingAnimation;
 window.parseAgentResponse       = parseAgentResponse;
+window.ratingToScore            = ratingToScore;
 window.parseAndLinkifyQuotes    = parseAndLinkifyQuotes;
 window.parseAndLinkifySources   = parseAndLinkifySources;
 window.escapeHtml               = escapeHtml;

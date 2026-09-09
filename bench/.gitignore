@@ -1,0 +1,3 @@
+node_modules/
+out/
+# fixtures/ are frozen artifacts shipped to ISOC (Milestone 2) — tracked, not ignored.

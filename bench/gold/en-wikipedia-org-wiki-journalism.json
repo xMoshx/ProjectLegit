@@ -1,0 +1,11 @@
+{
+  "_comment": "PILOT EXAMPLE — replace with the professional labeler's real labels. No sourceRegistry on purpose: this derives sourceReputation to `unrated`, the CEILING-rule case. No retest block: this article is not in the consistency subset.",
+  "slug": "en-wikipedia-org-wiki-journalism",
+  "url": "https://en.wikipedia.org/wiki/Journalism",
+  "labelDate": "2026-07-10",
+  "veracity": "verified-true",
+  "evidenceCount": 4,
+  "overallTrust": 75,
+  "goldTier": "yellow",
+  "gold": { "source": "NEUTRAL", "author": "ANONYMOUS", "consensus": "CORROBORATED", "headline": "ACCURATE", "bias": "BALANCED", "style": "PROFESSIONAL" }
+}

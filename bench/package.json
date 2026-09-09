@@ -1,0 +1,19 @@
+{
+  "name": "legit-bench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Benchmark harness for the Legit agent pipeline (Milestone 2: generator + offline eval).",
+  "scripts": {
+    "extract": "node corpus/extract.js",
+    "build-corpus": "node corpus/build-corpus.js",
+    "run": "node generator/run.js --corpus corpus/corpus.json",
+    "selftest": "node selftest.js",
+    "validate-gold": "node gold/validate-gold.js",
+    "metrics": "node eval/metrics.js",
+    "report": "node eval/report.js",
+    "replay": "node eval/replay.js"
+  },
+  "dependencies": {
+    "jsdom": "^24.1.0"
+  }
+}
